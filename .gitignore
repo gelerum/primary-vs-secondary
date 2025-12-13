@@ -1,0 +1,17 @@
+# data
+data/raw/*
+data/processed/*
+
+# env
+.env/
+.env.*
+
+# notebooks checkpoints
+.ipynb_checkpoints/
+
+# large files
+*.csv
+*.parquet
+*.xlsx
+
+.vscode/
