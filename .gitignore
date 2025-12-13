@@ -13,5 +13,6 @@ data/processed/*
 *.csv
 *.parquet
 *.xlsx
+*.html
 
 .vscode/
