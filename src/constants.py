@@ -1,0 +1,18 @@
+CANONICAL_COLUMNS = [
+    "address",
+    "latitude",
+    "longitude",
+    "area",
+    "room_count",
+    "floor",
+    "floor_count",
+    "housing_type",
+    "flat_type",
+    "wall_type",
+    "ceiling_height",
+    "build_year",
+    "balcony",
+    "price",
+    "price_per_square_meter",
+    "date",
+]
