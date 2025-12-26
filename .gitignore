@@ -1,6 +1,8 @@
 # data
 data/raw/*
 data/processed/*
+data/plots/*
+data/geocoding/*
 
 # env
 .env/
