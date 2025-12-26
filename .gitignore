@@ -18,3 +18,5 @@ data/geocoding/*
 *.html
 
 .vscode/
+
+__pycache__/
