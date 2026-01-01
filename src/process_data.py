@@ -1,15 +1,15 @@
 import pandas as pd
-from .data_loader import read_dfs
-from .adapters import (
+from src.data_loader import read_dfs
+from src.adapters import (
     adapt_dataframes,
     DF1_ADAPTER,
     DF2_ADAPTER,
     DF3_ADAPTER,
     DF4_ADAPTER,
 )
-from .normalization import normalize_datasets
-from .filters import drop_nan_addresses, drop_nan_prices
-from .geocoding import geocode_addresses
+from src.normalization import normalize_datasets
+from src.filters import drop_nan_addresses, drop_nan_prices, filter_by_geo
+from src.geocoding import geocode_addresses
 
 
 def main():
@@ -33,6 +33,8 @@ def main():
         checkpoint_path="data/geocoding/geocodes_checkpoint.parquet",
     )
     df_final = drop_nan_prices(df_clean)
+
+    df_final = filter_by_geo(df_final, 36.90, 38.05, 55.15, 56.05)
 
     df_final.to_parquet(
         "data/processed/housing_residential_processed.parquet", index=False
