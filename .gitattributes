@@ -4,6 +4,4 @@ data/raw/*.csv filter=lfs diff=lfs merge=lfs -text
 data/raw/*.xlsx filter=lfs diff=lfs merge=lfs -text
 data/raw/*.parquet filter=lfs diff=lfs merge=lfs -text
 data/geocoding/*.parquet filter=lfs diff=lfs merge=lfs -text
-data/processed/housing_residential_processed.csv filter=lfs diff=lfs merge=lfs -text
-data/processed/housing_residential_processed.parquet filter=lfs diff=lfs merge=lfs -text
 data/geocoding/*.csv filter=lfs diff=lfs merge=lfs -text
