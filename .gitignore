@@ -1,9 +1,4 @@
 # data
-data/raw/*
-data/processed/*
-data/plots/*
-data/geocoding/*
-
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/plots/.gitkeep
