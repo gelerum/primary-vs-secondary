@@ -10,9 +10,9 @@ data/geocoding/*
 !data/geocoding/.gitkeep
 
 # secrets
-secrets/*
+secrets/geocoding/*
 
-!secrets/.gitkeep
+!secrets/geocoding/.gitkeep
 
 
 # env
