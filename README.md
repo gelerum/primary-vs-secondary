@@ -1,37 +1,30 @@
-Перед запускам нужно положить следующие файлы в папку `data`
+# Перед клонированием
+Этот репозиторий использует **Git LFS (Large File Storage)** для датасетов в директории `data`.
 
-```bash
-.
-├── data
-│   ├── geocoding
-│   │   ├── geocodes_checkpoint.parquet # (опционально, чтобы заново не парсить данные)
-│   │   └── ya_api_keys.csv
-│   └── raw
-│       ├── Dataset_SCO_KVM_MONS_GRC_IZD_DMA_MTK_20250805.csv
-│       ├── Dataset_SCO_KVM_MONS_GRC_IZD_DMA_MTK_20250805.xlsx
-│       ├── Etagi_secondary_classified_dataset_20250805.csv
-│       ├── Etagi_secondary_classified_dataset_20250805.xlsx
-│       ├── Etagi_secondary_dataset_20250805.csv
-│       ├── Etagi_secondary_dataset_20250805.xlsx
-│       └── msk_united_geo_market_deals.parquet
+Перед тем как клонировать репозиторий установите **Git LFS**.
+
+**Ubuntu**
+```
+sudo apt install git-lfs
+```
+**Windows**
+Download from: https://git-lfs.github.com/
+
+Теперь можно клонировать
+```
+git clone git@github.com:gelerum/primary-vs-secondary.git
 ```
 
-В итоге получится такая структура
+Если датасеты не скачались автоматически:
+```
+git lfs pull
+```
+
+# Перед использованием репозитория
+Перед запускам нужно положить следующие файлы в директорию `secrets`, если планируется парсинг геоточек.
+
 ```bash
-.
-├── data
-│   ├── geocoding
-│   │   ├── geocodes_checkpoint.parquet # (если не было, то создастся)
-│   │   └── ya_api_keys.csv
-│   ├── processed
-│   │   ├── housing_residential_processed.csv
-│   │   └── housing_residential_processed.parquet
-│   └── raw
-│       ├── Dataset_SCO_KVM_MONS_GRC_IZD_DMA_MTK_20250805.csv
-│       ├── Dataset_SCO_KVM_MONS_GRC_IZD_DMA_MTK_20250805.xlsx
-│       ├── Etagi_secondary_classified_dataset_20250805.csv
-│       ├── Etagi_secondary_classified_dataset_20250805.xlsx
-│       ├── Etagi_secondary_dataset_20250805.csv
-│       ├── Etagi_secondary_dataset_20250805.xlsx
-│       └── msk_united_geo_market_deals.parquet
+├── secrets
+│   └── geocoding
+│       └── ya_api_keys.csv
 ```
