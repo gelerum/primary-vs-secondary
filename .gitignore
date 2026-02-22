@@ -9,6 +9,12 @@ data/geocoding/*
 !data/plots/.gitkeep
 !data/geocoding/.gitkeep
 
+# secrets
+secrets/*
+
+!secrets/.gitkeep
+
+
 # env
 .env/
 .env.*
