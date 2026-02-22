@@ -17,12 +17,6 @@ secrets/geocoding/*
 # notebooks checkpoints
 .ipynb_checkpoints/
 
-# large files
-*.csv
-*.parquet
-*.xlsx
-*.html
-
 .vscode/
 
 __pycache__/
