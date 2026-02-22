@@ -29,7 +29,7 @@ def main():
     df_clean = drop_nan_addresses(df_residential)
     df_clean = geocode_addresses(
         df_clean,
-        api_keys_path="data/geocoding/ya_api_keys.csv",
+        api_keys_path="secrets/geocoding/ya_api_keys.csv",
         checkpoint_path="data/geocoding/geocodes_checkpoint.parquet",
     )
     df_final = drop_nan_prices(df_clean)
@@ -39,6 +39,7 @@ def main():
     df_final.to_parquet(
         "data/processed/housing_residential_processed.parquet", index=False
     )
+    df_final.to_csv("data/processed/housing_residential_processed.csv", index=False)
     print(f"Final dataset: {df_final.shape[0]} rows x {df_final.shape[1]} columns")
 
 
