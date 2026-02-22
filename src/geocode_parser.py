@@ -146,6 +146,6 @@ def geocode_df_yandex(
     queue.put(stop_token)
     writer_thread.join()
 
-    print("✅ Геокодирование завершено")
+    print("Geocoding has finished")
 
     return result
