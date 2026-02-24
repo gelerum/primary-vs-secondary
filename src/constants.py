@@ -14,5 +14,4 @@ CANONICAL_COLUMNS = {
     "price": "float64",
     "price_per_square_meter": "float64",
     "date": "datetime64[ns]",
-    "market_type": "string",
 }
