@@ -48,13 +48,7 @@ def normalize_datasets(dfs):
 
     for df in dfs:
         if "date" in df.columns:
-            df["date"] = pd.to_datetime(
-                df["date"], errors="coerce", infer_datetime_format=True
-            )
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
             df["date"] = df["date"].dt.normalize()
-
-    for df in dfs:
-        df = df.dropna(how="all")
-        df = df.drop_duplicates()
 
     return dfs
