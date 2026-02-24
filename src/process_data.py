@@ -58,9 +58,9 @@ def main():
     df_final = df_filter_by_price
 
     df_final.to_parquet(
-        "data/processed/v3/housing_residential_processed.parquet", index=False
+        "data/processed/v2/housing_residential_processed.parquet", index=False
     )
-    df_final.to_csv("data/processed/v3/housing_residential_processed.csv", index=False)
+    df_final.to_csv("data/processed/v2/housing_residential_processed.csv", index=False)
     print(f"Final dataset: {df_final.shape[0]} rows x {df_final.shape[1]} columns")
 
 
