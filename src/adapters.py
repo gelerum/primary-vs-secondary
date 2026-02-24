@@ -19,8 +19,10 @@ DF1_ADAPTER = {
     "build_year": np.nan,
     "balcony": "Количество балконов",
     "price": lambda df: pd.to_numeric(df["Стоимость"], errors="coerce"),
-    "price_per_square_meter": lambda df: pd.to_numeric(df["Стоимость"], errors="coerce")
-    / pd.to_numeric(df["SFA, м2"], errors="coerce"),
+    "price_per_square_meter": lambda df: (
+        pd.to_numeric(df["Стоимость"], errors="coerce")
+        / pd.to_numeric(df["SFA, м2"], errors="coerce")
+    ),
     "date": "Дата последней брони",
 }
 
@@ -80,12 +82,14 @@ DF4_ADAPTER = {
     "housing_type": pd.NA,
     "flat_type": "Тип объекта",
     "ceiling_height": np.nan,
-    "build_year": lambda df: pd.to_datetime(
-        df["Дата договора"], errors="coerce"
-    ).dt.year,
+    "build_year": lambda df: (
+        pd.to_datetime(df["Дата договора"], errors="coerce").dt.year
+    ),
     "balcony": pd.NA,
-    "price": lambda df: pd.to_numeric(df["Площадь согласно ЕГРН"], errors="coerce")
-    * pd.to_numeric(df["Цена за кв. метр"], errors="coerce"),
+    "price": lambda df: (
+        pd.to_numeric(df["Площадь согласно ЕГРН"], errors="coerce")
+        * pd.to_numeric(df["Цена за кв. метр"], errors="coerce")
+    ),
     "price_per_square_meter": lambda df: pd.to_numeric(
         df["Цена за кв. метр"], errors="coerce"
     ),

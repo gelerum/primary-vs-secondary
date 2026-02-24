@@ -1,8 +1,14 @@
 # data
-data/raw/*
-data/processed/*
-data/plots/*
-data/geocoding/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/plots/.gitkeep
+!data/geocoding/.gitkeep
+
+# secrets
+secrets/geocoding/*
+
+!secrets/geocoding/.gitkeep
+
 
 # env
 .env/
@@ -10,12 +16,6 @@ data/geocoding/*
 
 # notebooks checkpoints
 .ipynb_checkpoints/
-
-# large files
-*.csv
-*.parquet
-*.xlsx
-*.html
 
 .vscode/
 
