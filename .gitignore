@@ -20,3 +20,11 @@ secrets/geocoding/*
 .vscode/
 
 __pycache__/
+
+
+# Virtual env
+venv/
+.venv/
+
+#PyCharm features
+.idea/
