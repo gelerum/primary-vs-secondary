@@ -28,3 +28,10 @@ git lfs pull
 │   └── geocoding
 │       └── ya_api_keys.csv
 ```
+
+# Запуск пайплайна для обработки датасетов
+```
+pip install -r requirements.txt
+
+python -m src.process_data.py
+```
