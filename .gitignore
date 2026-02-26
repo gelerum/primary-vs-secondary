@@ -12,7 +12,8 @@ secrets/geocoding/*
 
 # env
 .env/
-.env.*
+.env
+env/
 
 # notebooks checkpoints
 .ipynb_checkpoints/
