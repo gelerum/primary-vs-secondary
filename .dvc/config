@@ -1,1 +1,5 @@
-
+[core]
+    remote = storage
+['remote "storage"']
+    url = s3://870969472cc6-primary-vs-secondary
+    endpointurl = https://s3.ru1.storage.beget.cloud
