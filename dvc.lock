@@ -1,0 +1,128 @@
+schema: '2.0'
+stages:
+  01_clean:
+    cmd: python -m src.stages.01_clean
+    deps:
+    - path: data/raw/
+      hash: md5
+      md5: 47c90d8a4f11524fdc9e2f3e1c82cd88.dir
+      size: 483639863
+      nfiles: 4
+    - path: src/clean
+      hash: md5
+      md5: e2cb53ba826925eafb68ac2b58c38fe9.dir
+      size: 20868
+      nfiles: 12
+    - path: src/stages/01_clean.py
+      hash: md5
+      md5: 33a4a63af4ab919be76d2a73d53dd396
+      size: 1140
+    outs:
+    - path: data/interim/01_cleaned.parquet
+      hash: md5
+      md5: 75c22375c1484ffccaaf0fe6c6ce3342
+      size: 33054652
+  02_geocode:
+    cmd: python -m src.stages.02_geocode
+    deps:
+    - path: data/interim/01_cleaned.parquet
+      hash: md5
+      md5: 75c22375c1484ffccaaf0fe6c6ce3342
+      size: 33054652
+    - path: secrets/geocoding/ya_api_keys.csv
+      hash: md5
+      md5: 6341fa3afc572bc22370cade8b1c0968
+      size: 1447
+    - path: src/geocode
+      hash: md5
+      md5: 390ec60467e81cc338d0e289ef195003.dir
+      size: 14411
+      nfiles: 4
+    - path: src/stages/02_geocode.py
+      hash: md5
+      md5: bb90c5d601e0c98ab39c2919ff4e0677
+      size: 457
+    outs:
+    - path: data/cache/geocodes_checkpoint.parquet
+      hash: md5
+      md5: 8220fb88e84327ce0852e845bd3413f8
+      size: 3453101
+    - path: data/interim/02_geocoded.parquet
+      hash: md5
+      md5: ddf0bf6afa916f20ee0a212fe3ee9d7d
+      size: 31808243
+  03_filter:
+    cmd: python -m src.stages.03_filter
+    deps:
+    - path: data/interim/02_geocoded.parquet
+      hash: md5
+      md5: ddf0bf6afa916f20ee0a212fe3ee9d7d
+      size: 31808243
+    - path: src/filter
+      hash: md5
+      md5: 3b99112aa338dd37e92385ae37aa54ac.dir
+      size: 4399
+      nfiles: 2
+    - path: src/stages/03_filter.py
+      hash: md5
+      md5: 9d2dd539cd46a237e95b6ca9cbf3e074
+      size: 684
+    outs:
+    - path: data/interim/03_filtered.parquet
+      hash: md5
+      md5: a9ecc71901d9edd75547c6d81ffa6f57
+      size: 31144832
+  04a_price_discount:
+    cmd: python -m src.stages.04a_price_discount
+    deps:
+    - path: data/interim/03_filtered.parquet
+      hash: md5
+      md5: a9ecc71901d9edd75547c6d81ffa6f57
+      size: 31144832
+    - path: src/feature/price_discount.py
+      hash: md5
+      md5: 5f63e6e37680aa16fdc10836e2f78ac4
+      size: 552
+    - path: src/stages/04a_price_discount.py
+      hash: md5
+      md5: c3b0fe7ac151e711e3624283f433c67a
+      size: 298
+    outs:
+    - path: data/interim/04a_price_discounted.parquet
+      hash: md5
+      md5: 9720f73f3d37a9d9c9267d1624429e27
+      size: 51790713
+  04b_knn_features:
+    cmd: python -m src.stages.04b_mean_knn
+    deps:
+    - path: data/interim/04a_price_discounted.parquet
+      hash: md5
+      md5: 9720f73f3d37a9d9c9267d1624429e27
+      size: 51790713
+    - path: src/stages/04b_mean_knn.py
+      hash: md5
+      md5: 9fd2fb888e3ad292336cf120aa308658
+      size: 802
+    outs:
+    - path: data/interim/04b_mean_knn.parquet
+      hash: md5
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
+  publish_processed:
+    cmd: "cp data/interim/04b_mean_knn.parquet data/processed/final.parquet\npython
+      -c \"\nimport pandas as pd\ndf = pd.read_parquet('data/interim/04b_mean_knn.parquet')\n\
+      df.to_csv('data/processed/final.csv', index=False)\n\"\n"
+    deps:
+    - path: data/interim/04b_mean_knn.parquet
+      hash: md5
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
+    outs:
+    - path: data/processed/final.csv
+      hash: md5
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
+    - path: data/processed/final.parquet
+      hash: md5
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0

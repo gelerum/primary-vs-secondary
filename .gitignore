@@ -1,31 +1,20 @@
-# data
-!data/raw/.gitkeep
+!data/cache/.gitkeep
+!data/interim/.gitkeep
 !data/processed/.gitkeep
-!data/plots/.gitkeep
-!data/geocoding/.gitkeep
+!data/raw/.gitkeep
 
-# secrets
 secrets/geocoding/*
+!data/*.dvc
 
 !secrets/geocoding/.gitkeep
-
-
-# env
 .env/
 .env
 env/
-
-# notebooks checkpoints
 .ipynb_checkpoints/
-
 .vscode/
-
 __pycache__/
-
-
-# Virtual env
 venv/
 .venv/
-
-#PyCharm features
 .idea/
+
+/data
