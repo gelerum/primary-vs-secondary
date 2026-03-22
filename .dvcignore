@@ -1,3 +1,8 @@
 # Add patterns of files dvc should ignore, which could improve
 # the performance. Learn more at
 # https://dvc.org/doc/user-guide/dvcignore
+
+data/cache/.gitkeep
+data/interim/.gitkeep
+data/processed/.gitkeep
+data/raw/.gitkeep
