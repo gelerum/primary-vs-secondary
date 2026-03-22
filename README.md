@@ -11,7 +11,7 @@ dvc remote modify storage access_key_id <your_access_key>
 dvc remote modify storage secret_access_key <your_secret_key>
 ```
 
-# Загрузка финального и промежуточного датасетов
+# Загрузка финального и промежуточных датасетов
 
 ```
 dvc pull
