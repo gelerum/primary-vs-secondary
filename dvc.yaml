@@ -5,7 +5,10 @@ stages:
     deps:
       - src/stages/01_clean.py
       - src/clean
-      - data/raw/
+      - data/raw/Dataset_SCO_KVM_MONS_GRC_IZD_DMA_MTK_20250805.csv
+      - data/raw/Etagi_secondary_classified_dataset_20250805.csv
+      - data/raw/Etagi_secondary_dataset_20250805.csv
+      - data/raw/msk_united_geo_market_deals.parquet
     outs:
       - data/interim/01_cleaned.parquet
 

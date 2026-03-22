@@ -3,11 +3,22 @@ stages:
   01_clean:
     cmd: python -m src.stages.01_clean
     deps:
-    - path: data/raw/
+    - path: data/raw/Dataset_SCO_KVM_MONS_GRC_IZD_DMA_MTK_20250805.csv
       hash: md5
-      md5: 47c90d8a4f11524fdc9e2f3e1c82cd88.dir
-      size: 483639863
-      nfiles: 4
+      md5: e07d0dd497440a1589970c0b1ffd532f
+      size: 10321279
+    - path: data/raw/Etagi_secondary_classified_dataset_20250805.csv
+      hash: md5
+      md5: 89fbe1215809c3d0c3d510132273044e
+      size: 111092939
+    - path: data/raw/Etagi_secondary_dataset_20250805.csv
+      hash: md5
+      md5: 09695d1cb9e94f3c562a485e0bf532a9
+      size: 26001664
+    - path: data/raw/msk_united_geo_market_deals.parquet
+      hash: md5
+      md5: 2e0c03633c794dbf0c2749209454c0a5
+      size: 336223981
     - path: src/clean
       hash: md5
       md5: e2cb53ba826925eafb68ac2b58c38fe9.dir
