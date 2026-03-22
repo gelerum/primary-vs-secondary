@@ -1,0 +1,18 @@
+CANONICAL_COLUMNS = {
+    "address": "string",
+    "latitude": "float64",
+    "longitude": "float64",
+    "area": "float64",
+    "room_count": "Int64",
+    "floor": "Int64",
+    "floor_count": "Int64",
+    "housing_type": "string",
+    "flat_type": "string",
+    "ceiling_height": "float64",
+    "build_year": "Int64",
+    "balcony": "bool",
+    "price": "float64",
+    "price_per_square_meter": "float64",
+    "date": "datetime64[ns]",
+    "market_type": "string",
+}
