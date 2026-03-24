@@ -7,8 +7,8 @@ pip install -r requirements.txt
 # Настройка доступа к S3 для DVC
 
 ```
-dvc remote modify storage access_key_id <your_access_key>
-dvc remote modify storage secret_access_key <your_secret_key>
+dvc remote modify --local storage access_key_id <your_access_key>
+dvc remote modify --local storage secret_access_key <your_secret_key>
 ```
 
 # Загрузка финального и промежуточных датасетов
