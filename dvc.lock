@@ -92,8 +92,8 @@ stages:
       size: 31144832
     - path: src/price_discount
       hash: md5
-      md5: 993e7e50d11995d05abe82cca494f488.dir
-      size: 1156
+      md5: 3adc23d7e9a7402cbf3469c13c2b991b.dir
+      size: 1082
       nfiles: 1
     - path: src/stages/03_price_discount.py
       hash: md5
@@ -102,8 +102,8 @@ stages:
     outs:
     - path: data/interim/03_price_discounted.parquet
       hash: md5
-      md5: 9720f73f3d37a9d9c9267d1624429e27
-      size: 51790713
+      md5: 922fbbde4d74fb56253c957d170c00a3
+      size: 52066944
   04_mean_knn:
     cmd: python -m src.stages.04_mean_knn
     deps:
