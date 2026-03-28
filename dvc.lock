@@ -109,8 +109,8 @@ stages:
     deps:
     - path: data/interim/03_price_discounted.parquet
       hash: md5
-      md5: 9720f73f3d37a9d9c9267d1624429e27
-      size: 51790713
+      md5: 922fbbde4d74fb56253c957d170c00a3
+      size: 52066944
     - path: src/mean_knn
       hash: md5
       md5: 3f99acd93a64a8184946d2b8c6781866.dir
@@ -126,14 +126,16 @@ stages:
       md5: d41d8cd98f00b204e9800998ecf8427e
       size: 0
   publish_processed:
-    cmd: "cp data/interim/04_mean_knn.parquet data/processed/final.parquet\npython
-      -c \"\nimport pandas as pd\ndf = pd.read_parquet('data/interim/04_mean_knn.parquet')\n\
-      df.to_csv('data/processed/final.csv', index=False)\n\"\n"
+    cmd: python -m src.stages.05_publish_processed.py
     deps:
     - path: data/interim/04_mean_knn.parquet
       hash: md5
       md5: d41d8cd98f00b204e9800998ecf8427e
       size: 0
+    - path: src/stages/05_publish_processed.py
+      hash: md5
+      md5: bfda8239ba0e58731998db2ce8b60062
+      size: 189
     outs:
     - path: data/processed/final.csv
       hash: md5
