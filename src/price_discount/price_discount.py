@@ -30,6 +30,10 @@ def discount_prices(df, min_obs=30):
         how="left",
     )
 
-    df["price_sqm_real"] = df["price_per_square_meter"] / df["discount_index"]
+    df["price_per_square_meter_normalized"] = (
+        df["price_per_square_meter"] / df["discount_index"]
+    )
+
+    df["price_normalized"] = df["price_per_square_meter_normalized"] * df["area"]
 
     return df
