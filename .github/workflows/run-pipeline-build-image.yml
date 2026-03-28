@@ -6,6 +6,7 @@ on:
       - 'Dockerfile'
       - 'dvc.yaml'
       - 'params.yaml'
+      - '.github/workflows/run-pipeline-build-image.yml'
       - 'requirements.txt'
   workflow_dispatch:
 
