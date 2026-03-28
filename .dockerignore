@@ -1,0 +1,16 @@
+data/
+notebooks/
+secrets/
+
+.dvc/cache/
+.dvc/tmp/
+
+.env/
+.env
+env/
+.ipynb_checkpoints/
+.vscode/
+__pycache__/
+venv/
+.venv/
+.idea/
