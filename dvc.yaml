@@ -47,15 +47,10 @@ stages:
       - data/interim/04_mean_knn.parquet
 
   publish_processed:
-    cmd: |
-      cp data/interim/04_mean_knn.parquet data/processed/final.parquet
-      python -c "
-      import pandas as pd
-      df = pd.read_parquet('data/interim/04_mean_knn.parquet')
-      df.to_csv('data/processed/final.csv', index=False)
-      "
+    cmd: python src/publish_processed/copy_and_export.py
     deps:
       - data/interim/04_mean_knn.parquet
+      - src/publish_processed/copy_and_export.py
     outs:
       - data/processed/final.parquet
       - data/processed/final.csv
