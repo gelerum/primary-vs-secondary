@@ -57,7 +57,8 @@ def geocode_df_yandex(
     addresses = [a for a in df[address_column] if a not in processed]
     total = len(addresses)
 
-    print(f"▶ К обработке: {total} адресов")
+    if total != 0:
+        print(f"▶ К обработке: {total} адресов")
 
     # --- делим адреса между ключами ---
     chunks = [addresses[i :: len(api_keys)] for i in range(len(api_keys))]

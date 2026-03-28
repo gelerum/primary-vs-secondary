@@ -17,17 +17,6 @@ def drop_nan_prices(df: DataFrame):
     )
 
 
-def filter_by_geo(df, longitude_min, longitude_max, latitude_min, latitude_max):
-    df_filtered = df[
-        (df["longitude"] >= longitude_min)
-        & (df["longitude"] <= longitude_max)
-        & (df["latitude"] >= latitude_min)
-        & (df["latitude"] <= latitude_max)
-    ].reset_index(drop=True)
-
-    return df_filtered
-
-
 def filter_by_area(df, area_min, area_max):
     df_filtered = df[(df["area"] >= area_min) & (df["area"] <= area_max)]
 
@@ -42,6 +31,18 @@ def filter_by_floor(df, floor_min, floor_max):
 
 def filter_by_price(df, price_min, price_max):
     df_filtered = df[(df["price"] >= price_min) & (df["price"] <= price_max)]
+
+    return df_filtered
+
+
+def filter_by_build_year(df, min_value, max_value):
+    df_filtered = df.copy()
+
+    if min_value is not None:
+        df_filtered = df_filtered[df_filtered["price"] >= min_value]
+
+    if max_value is not None:
+        df_filtered = df_filtered[df_filtered["price"] <= max_value]
 
     return df_filtered
 
