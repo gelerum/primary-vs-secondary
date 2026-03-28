@@ -8,6 +8,9 @@ data/raw/*
 !data/processed/.gitkeep
 !data/raw/.gitkeep
 
+!*.dvc
+!.dvc/config
+
 secrets/*
 
 !secrets/geocoding/.gitkeep

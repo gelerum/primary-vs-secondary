@@ -48,7 +48,7 @@ jobs:
               # Основной пайплайн
               git config --global --add safe.directory /app && \
               dvc pull && \
-              dvc repro && \
+              dvc repro --force && \
               dvc push
             '
       - name: Commit and Push dvc.lock
