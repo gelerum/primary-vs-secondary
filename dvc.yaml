@@ -47,7 +47,7 @@ stages:
       - data/interim/04_mean_knn.parquet
 
   publish_processed:
-    cmd: python -m src.stages.05_publish_processed.py
+    cmd: python -m src.stages.05_publish_processed
     deps:
       - data/interim/04_mean_knn.parquet
       - src/stages/05_publish_processed.py
