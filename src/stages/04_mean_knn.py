@@ -1,10 +1,10 @@
 import pandas as pd
 
-from src.feature.mean_knn import compute_mean_knn_by_geo, compute_ratio_knn
+from src.mean_knn.mean_knn import compute_mean_knn_by_geo, compute_ratio_knn
 
 
 def main():
-    df = pd.read_parquet("data/interim/04a_price_discounted.parquet")
+    df = pd.read_parquet("data/interim/03_price_discounted.parquet")
 
     df_primary = df[df["market_type"] == "primary"].copy()
 
@@ -23,7 +23,7 @@ def main():
 
     df_mean_knn = pd.concat([df_primary, df_secondary])
 
-    df_mean_knn.to_parquet("data/interim/04b_mean_knn.parquet", index=False)
+    df_mean_knn.to_parquet("data/interim/04_mean_knn.parquet", index=False)
 
 
 if __name__ == "__main__":
