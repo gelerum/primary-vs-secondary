@@ -18,7 +18,7 @@ stages:
     cmd: python -m src.stages.02_geocode
     deps:
       - data/interim/01_cleaned.parquet
-      - secrets/geocoding/ya_api_keys.csv
+      # - secrets/geocoding/ya_api_keys.csv
       - src/stages/02_geocode.py
       - src/geocode
     params:
