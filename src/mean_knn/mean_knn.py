@@ -18,7 +18,7 @@ def compute_mean_knn_by_geo(df, k: int, h: float):
     dist_m = dist_m[:, 1:]
     ind = ind[:, 1:]
 
-    max_dist_knn = np.max(dist_m)
+    max_dist_knn = np.max(dist_m, axis=1)
     df["max_distance_knn"] = max_dist_knn
 
     dist_m[dist_m == 0] = 1

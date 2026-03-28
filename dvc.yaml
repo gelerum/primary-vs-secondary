@@ -9,6 +9,8 @@ stages:
       - data/raw/Etagi_secondary_classified_dataset_20250805.csv
       - data/raw/Etagi_secondary_dataset_20250805.csv
       - data/raw/msk_united_geo_market_deals.parquet
+    params:
+      - 01_clean
     outs:
       - data/interim/01_cleaned.parquet
 
@@ -19,49 +21,41 @@ stages:
       - secrets/geocoding/ya_api_keys.csv
       - src/stages/02_geocode.py
       - src/geocode
-      
+    params:
+      - 02_geocode
     outs:
       - data/interim/02_geocoded.parquet
       - data/cache/geocodes_checkpoint.parquet:
           persist: true
 
-  03_filter:
-    cmd: python -m src.stages.03_filter
+  03_price_discount:
+    cmd: python -m src.stages.03_price_discount
     deps:
-      - src/stages/03_filter.py
-      - src/filter
+      - src/stages/03_price_discount.py
       - data/interim/02_geocoded.parquet
+      - src/price_discount
     outs:
-      - data/interim/03_filtered.parquet
+      - data/interim/03_price_discounted.parquet
 
-  04a_price_discount:
-    cmd: python -m src.stages.04a_price_discount
+  04_mean_knn:
+    cmd: python -m src.stages.04_mean_knn
     deps:
-      - src/stages/04a_price_discount.py
-      - src/feature/price_discount.py
-      - data/interim/03_filtered.parquet
+      - src/stages/04_mean_knn.py
+      - data/interim/03_price_discounted.parquet
+      - src/mean_knn
     outs:
-      - data/interim/04a_price_discounted.parquet
-
-  04b_knn_features:
-    cmd: python -m src.stages.04b_mean_knn
-    deps:
-      - src/stages/04b_mean_knn.py
-      - data/interim/04a_price_discounted.parquet
-      - src/feature/mean_knn.py
-    outs:
-      - data/interim/04b_mean_knn.parquet
+      - data/interim/04_mean_knn.parquet
 
   publish_processed:
     cmd: |
-      cp data/interim/04b_mean_knn.parquet data/processed/final.parquet
+      cp data/interim/04_mean_knn.parquet data/processed/final.parquet
       python -c "
       import pandas as pd
-      df = pd.read_parquet('data/interim/04b_mean_knn.parquet')
+      df = pd.read_parquet('data/interim/04_mean_knn.parquet')
       df.to_csv('data/processed/final.csv', index=False)
       "
     deps:
-      - data/interim/04b_mean_knn.parquet
+      - data/interim/04_mean_knn.parquet
     outs:
       - data/processed/final.parquet
       - data/processed/final.csv
