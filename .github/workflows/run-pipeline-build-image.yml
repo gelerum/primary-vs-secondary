@@ -31,16 +31,13 @@ jobs:
 
       - name: Run DVC inside Docker
         run: |
-          # Мы запускаем контейнер, монтируем текущую папку (-v), 
-          # чтобы dvc.lock сохранился на виртуальной машине GitHub, а не пропал внутри контейнера.
-          # Также пробрасываем секреты (-e) для доступа к удаленному хранилищу DVC.
-          
           docker run --rm \
             -v ${{ github.workspace }}:/app \
-            -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
-            -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+            -w /app \
+            -e AWS_ACCESS_KEY_ID=${{ secrets.DVC_ACCESS_KEY_ID }} \
+            -e AWS_SECRET_ACCESS_KEY=${{ secrets.DVC_SECRET_ACCESS_KEY }} \
             my-ml-image:latest \
-            bash -c "dvc repro --pull && dvc push"
+            bash -c "git config --global --add safe.directory /app && dvc pull && dvc repro && dvc push"
 
       - name: Commit and Push dvc.lock
         run: |
