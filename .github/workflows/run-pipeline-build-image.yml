@@ -38,8 +38,19 @@ jobs:
             -e AWS_ACCESS_KEY_ID=${{ secrets.DVC_ACCESS_KEY_ID }} \
             -e AWS_SECRET_ACCESS_KEY=${{ secrets.DVC_SECRET_ACCESS_KEY }} \
             my-ml-image:latest \
-            bash -c "git config --global --add safe.directory /app && dvc pull && dvc repro && dvc push"
-
+            bash -c '
+              # Узнаем ID пользователя, которому принадлежит папка на хосте
+              HOST_USER=$(stat -c "%u:%g" /app);
+              
+              # Гарантируем, что при выходе из контейнера права вернутся владельцу
+              trap "chown -R $HOST_USER /app" EXIT;
+              
+              # Основной пайплайн
+              git config --global --add safe.directory /app && \
+              dvc pull && \
+              dvc repro && \
+              dvc push
+            '
       - name: Commit and Push dvc.lock
         run: |
           git config --global user.name "github-actions[bot]"
