@@ -55,14 +55,10 @@ stages:
       hash: md5
       md5: 59f9db1cbc90ae887ea7beb16d38962b
       size: 33034300
-    - path: secrets/geocoding/ya_api_keys.csv
-      hash: md5
-      md5: 6341fa3afc572bc22370cade8b1c0968
-      size: 1447
     - path: src/geocode
       hash: md5
-      md5: 2c9113355939b2f50053c44ba99fd0a6.dir
-      size: 5923
+      md5: 0f0b5b11ba300c1444a1a5b5cb7b88ec.dir
+      size: 5983
       nfiles: 3
     - path: src/stages/02_geocode.py
       hash: md5
@@ -96,8 +92,8 @@ stages:
       size: 31144832
     - path: src/price_discount
       hash: md5
-      md5: 87570c10ccc9df8ea7e149405dfc93f9.dir
-      size: 552
+      md5: 993e7e50d11995d05abe82cca494f488.dir
+      size: 1156
       nfiles: 1
     - path: src/stages/03_price_discount.py
       hash: md5
