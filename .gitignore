@@ -8,9 +8,10 @@ data/raw/*
 !data/processed/.gitkeep
 !data/raw/.gitkeep
 
-secrets/geocoding/*
+secrets/*
 
 !secrets/geocoding/.gitkeep
+
 .env/
 .env
 env/
@@ -20,4 +21,3 @@ __pycache__/
 venv/
 .venv/
 .idea/
-

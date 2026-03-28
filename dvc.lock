@@ -21,13 +21,13 @@ stages:
       size: 336223981
     - path: src/clean
       hash: md5
-      md5: 1c9afb645ca296404208fc501e281c0b.dir
-      size: 24621
+      md5: bebb8ff0399564f16e60e176a27e6166.dir
+      size: 25266
       nfiles: 15
     - path: src/stages/01_clean.py
       hash: md5
-      md5: 551e09c1a28d6f54f493ccf4cda92dfc
-      size: 1694
+      md5: 5ac92fdfd22a3e45fd57d27fa2ef862e
+      size: 1881
     params:
       params.yaml:
         01_clean:
@@ -40,6 +40,9 @@ stages:
           price:
             min: 1100000
             max: 7300000000
+          build_year:
+            min: 1685
+            max:
     outs:
     - path: data/interim/01_cleaned.parquet
       hash: md5
@@ -63,8 +66,18 @@ stages:
       nfiles: 6
     - path: src/stages/02_geocode.py
       hash: md5
-      md5: 7e52a22ba7b333ccc4ba40a6b4f034b2
-      size: 591
+      md5: f6d0d05380478c4661a914bc90ac8f92
+      size: 822
+    params:
+      params.yaml:
+        02_geocode:
+          geo:
+            longitude:
+              min: 36.9
+              max: 38.05
+            latitude:
+              min: 55.15
+              max: 56.05
     outs:
     - path: data/cache/geocodes_checkpoint.parquet
       hash: md5
@@ -132,11 +145,11 @@ stages:
       md5: d41d8cd98f00b204e9800998ecf8427e
       size: 0
   publish_processed:
-    cmd: "cp data/interim/04b_mean_knn.parquet data/processed/final.parquet\npython
-      -c \"\nimport pandas as pd\ndf = pd.read_parquet('data/interim/04b_mean_knn.parquet')\n\
+    cmd: "cp data/interim/04_mean_knn.parquet data/processed/final.parquet\npython
+      -c \"\nimport pandas as pd\ndf = pd.read_parquet('data/interim/04_mean_knn.parquet')\n\
       df.to_csv('data/processed/final.csv', index=False)\n\"\n"
     deps:
-    - path: data/interim/04b_mean_knn.parquet
+    - path: data/interim/04_mean_knn.parquet
       hash: md5
       md5: d41d8cd98f00b204e9800998ecf8427e
       size: 0
@@ -170,3 +183,24 @@ stages:
       hash: md5
       md5: 9720f73f3d37a9d9c9267d1624429e27
       size: 51790713
+  04_mean_knn:
+    cmd: python -m src.stages.04_mean_knn
+    deps:
+    - path: data/interim/03_price_discounted.parquet
+      hash: md5
+      md5: 9720f73f3d37a9d9c9267d1624429e27
+      size: 51790713
+    - path: src/mean_knn
+      hash: md5
+      md5: 71dc119d5eec408f714a7d437814b161.dir
+      size: 4403
+      nfiles: 2
+    - path: src/stages/04_mean_knn.py
+      hash: md5
+      md5: 5b6191ef281c5000bb94afebdd00ebff
+      size: 801
+    outs:
+    - path: data/interim/04_mean_knn.parquet
+      hash: md5
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
