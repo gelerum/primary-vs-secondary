@@ -18,4 +18,4 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-CMD ["dvc", "repro", "--pull"]
+# CMD ["dvc", "repro", "--pull"]
