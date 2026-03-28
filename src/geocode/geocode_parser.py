@@ -37,6 +37,7 @@ def geocode_df_yandex(
     МАКСИМАЛЬНО БЫСТРАЯ версия.
     1 поток = 1 API-ключ.
     """
+    api_keys = []
 
     if address_column not in df.columns:
         raise ValueError(f"В DataFrame должна быть колонка '{address_column}'")
@@ -59,6 +60,8 @@ def geocode_df_yandex(
 
     if total != 0:
         print(f"▶ К обработке: {total} адресов")
+    if total == 0:
+        return result
 
     # --- делим адреса между ключами ---
     chunks = [addresses[i :: len(api_keys)] for i in range(len(api_keys))]

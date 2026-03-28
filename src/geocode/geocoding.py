@@ -7,11 +7,11 @@ def geocode_addresses(
     api_keys_path,
     checkpoint_path,
 ):
-    api_keys = pd.read_csv(api_keys_path)["key"].astype(str).str.strip().tolist()
+    # api_keys = pd.read_csv(api_keys_path)["key"].astype(str).str.strip().tolist()
 
     df_to_geocode = df.loc[df["latitude"].isna() | df["longitude"].isna(), ["address"]]
     df_geocoded = geocode_df_yandex(
-        df_to_geocode, api_keys, checkpoint_path=checkpoint_path
+        df_to_geocode, None, checkpoint_path=checkpoint_path
     )
     df_geocoded = df_geocoded.loc[
         df_geocoded["latitude"].notna() & df_geocoded["longitude"].notna()
