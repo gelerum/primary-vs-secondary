@@ -37,6 +37,8 @@ jobs:
             -w /app \
             -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
             -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+            -e AWS_REQUEST_CHECKSUM_CALCULATION=when_required \
+            -e AWS_RESPONSE_CHECKSUM_VALIDATION=when_required \
             my-ml-image:latest \
             bash -c '
               # Узнаем ID пользователя, которому принадлежит папка на хосте
