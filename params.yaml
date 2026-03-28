@@ -1,0 +1,23 @@
+01_clean:
+  area: 
+    min: 17.5
+    max: 1100
+  floor:
+    min: -4
+    max: 85
+  price:
+    min: 1_100_000
+    max: 7_300_000_000
+  build_year:
+    min: 1685
+    max: null
+02_geocode:
+  geo:
+    longitude:
+      min: 36.90
+      max: 38.05
+    latitude:
+      min: 55.15
+      max: 56.05
+03_price_discount:
+04_mean_knn:
