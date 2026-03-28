@@ -123,15 +123,15 @@ stages:
     outs:
     - path: data/interim/04_mean_knn.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: e731efb0499a202128e776bc4eae87a7
+      size: 50561213
   publish_processed:
-    cmd: python -m src.stages.05_publish_processed.py
+    cmd: python -m src.stages.05_publish_processed
     deps:
     - path: data/interim/04_mean_knn.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: e731efb0499a202128e776bc4eae87a7
+      size: 50561213
     - path: src/stages/05_publish_processed.py
       hash: md5
       md5: bfda8239ba0e58731998db2ce8b60062
@@ -139,9 +139,9 @@ stages:
     outs:
     - path: data/processed/final.csv
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 445ba2a1459b47e42db7aaa4d07775c5
+      size: 370466401
     - path: data/processed/final.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: e731efb0499a202128e776bc4eae87a7
+      size: 50561213
