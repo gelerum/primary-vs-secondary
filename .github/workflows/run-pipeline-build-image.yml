@@ -50,8 +50,8 @@ jobs:
 
           docker run --rm \
             -v ${{ github.workspace }}:/app \
-            -v /etc/passwd:/etc/passwd:ro \                       <-- ADD THIS LINE
-            -v /etc/group:/etc/group:ro \                         <-- ADD THIS LINE
+            -v /etc/passwd:/etc/passwd:ro \
+            -v /etc/group:/etc/group:ro \
             -w /app \
             -u ${HOST_UID}:${HOST_GID} \
             -e HOME=/tmp \
