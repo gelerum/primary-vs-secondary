@@ -1,6 +1,6 @@
 import pandas as pd
 
-from src.report.plots import plot_map, plot_pdf_ecdf
+from src.report.plots import plot_heatmap, plot_pdf_ecdf
 from dvc.api import params_show
 
 
@@ -18,18 +18,20 @@ def main():
         "reports/pdf_ecdf_primary_to_secondary_price_ratio.png", scale=2, format="png"
     )
 
-    fig = plot_map(
+    m = plot_heatmap(
         df,
         "latitude",
         "longitude",
         "primary_to_secondary_price_ratio",
         "Primary to Secondary Price Ratio heatmap",
-        params["geo"]["longitude"]["min"],
-        params["geo"]["longitude"]["max"],
-        params["geo"]["latitude"]["min"],
-        params["geo"]["latitude"]["max"],
+        36.90,
+        38.05,
+        55.15,
+        56.05,
+        15,
     )
-    fig.write_image("reports/map.png", scale=2, format="png")
+
+    m.save("reports/heatmap.html")
 
 
 if __name__ == "__main__":

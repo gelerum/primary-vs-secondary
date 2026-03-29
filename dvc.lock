@@ -165,3 +165,29 @@ stages:
       hash: md5
       md5: e731efb0499a202128e776bc4eae87a7
       size: 50561213
+  05_report:
+    cmd: python -m src.stages.05_report
+    deps:
+    - path: data/interim/04_mean_knn.parquet
+      hash: md5
+      md5: e731efb0499a202128e776bc4eae87a7
+      size: 50561213
+    - path: src/report
+      hash: md5
+      md5: c42821b23434f2f1b000fe119884b0e0.dir
+      size: 2733
+      nfiles: 1
+    - path: src/stages/05_report.py
+      hash: md5
+      md5: 34b3fe3b69ce36b36ece92e21a2aa108
+      size: 812
+    params:
+      params.yaml:
+        02_geocode:
+          geo:
+            longitude:
+              min: 36.9
+              max: 38.05
+            latitude:
+              min: 55.15
+              max: 56.05

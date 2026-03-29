@@ -1,7 +1,9 @@
-import plotly.express as px
+import folium
+from folium.plugins import HeatMap
 from plotly.subplots import make_subplots
 import numpy as np
 from plotly import graph_objects as go
+import branca.colormap as cm
 
 
 def plot_pdf_ecdf(df, column, title=None, bin_size=0.1):
@@ -35,34 +37,79 @@ def plot_pdf_ecdf(df, column, title=None, bin_size=0.1):
     return fig
 
 
-def plot_map(df, x_col, y_col, z_col, title, x_min, x_max, y_min, y_max):
-    df = df[df["market_type"] == "primary"].dropna(subset=[x_col, y_col, z_col])
+def plot_heatmap(
+    df,
+    x_col: str,
+    y_col: str,
+    z_col: str,
+    title: str,
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    radius: int,
+):
+    df = df[df["market_type"] == "primary"]
 
-    # Центр области
-    center_lat = (y_min + y_max) / 2
-    center_lon = (x_min + x_max) / 2
+    # Копируем и очищаем данные
+    data = df[[y_col, x_col, z_col]].copy()
+    data = data.dropna()
+    data = data[np.isfinite(data[z_col])]
 
-    # Примерный zoom (подбери под свои данные, обычно 5–12)
-    # Можно посчитать автоматически, но проще подобрать
-    zoom = 8
+    if len(data) == 0:
+        raise ValueError("Нет валидных данных после очистки NaN/Inf")
 
-    fig = px.scatter_map(
-        df,
-        lat=y_col,  # внимание: в px.scatter_map это lat / lon, а не x_col/y_col!
-        lon=x_col,
-        color=z_col,
-        color_continuous_scale="Viridis",
-        title=title,
-        zoom=zoom,  # ← задаём здесь
-        center={"lat": center_lat, "lon": center_lon},  # ← и центр
-        height=800,
+    # Границы карты
+    m = folium.Map(
+        location=[(y_min + y_max) / 2, (x_min + x_max) / 2], zoom_start=10, tiles=None
     )
+    folium.TileLayer("CartoDB positron", opacity=0.35).add_to(m)
 
-    fig.update_layout(
-        map_style="carto-positron",  # новый параметр (был mapbox_style)
-        margin=dict(l=0, r=0, t=0, b=0),
-        uirevision=True,
-        map=dict(bounds=dict(west=x_min, east=x_max, south=y_min, north=y_max)),
+    # === Viridis ===
+    viridis_colors = [
+        "#440154",
+        "#482677",
+        "#414487",
+        "#355f8d",
+        "#2a788e",
+        "#21918c",
+        "#22a884",
+        "#44bf70",
+        "#7ad151",
+        "#bddf26",
+    ]
+
+    # Нормализация значений z
+    z_min = data[z_col].min()
+    z_max = data[z_col].max()
+
+    data["weight"] = (data[z_col] - z_min) / (z_max - z_min)
+    data["weight"] = data["weight"].clip(0, 1)
+
+    heat_data = data[[x_col, y_col, "weight"]].values.tolist()
+
+    # Gradient
+    gradient = {
+        i / (len(viridis_colors) - 1): color for i, color in enumerate(viridis_colors)
+    }
+
+    HeatMap(
+        heat_data,
+        radius=radius,
+        blur=15,
+        min_opacity=0.3,
+        max_zoom=15,
+        gradient=gradient,
+    ).add_to(m)
+
+    # Легенда
+    colormap = cm.LinearColormap(
+        colors=viridis_colors, vmin=z_min, vmax=z_max, caption=title
     )
+    colormap = colormap.to_step(n=8)
+    colormap.add_to(m)
 
-    return fig
+    # Ограничиваем область просмотра
+    m.fit_bounds([[y_min, x_min], [y_max, x_max]])
+
+    return m
