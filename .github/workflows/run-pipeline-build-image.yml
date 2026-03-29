@@ -50,9 +50,11 @@ jobs:
 
           docker run --rm \
             -v ${{ github.workspace }}:/app \
+            -v /etc/passwd:/etc/passwd:ro \                       <-- ADD THIS LINE
+            -v /etc/group:/etc/group:ro \                         <-- ADD THIS LINE
             -w /app \
             -u ${HOST_UID}:${HOST_GID} \
-            -e HOME=/app \
+            -e HOME=/tmp \
             -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
             -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
             -e AWS_REQUEST_CHECKSUM_CALCULATION=when_required \
@@ -60,7 +62,6 @@ jobs:
             my-ml-image:latest \
             bash -c '
               set -e
-
               git config --global --add safe.directory /app
 
               echo "=== Starting DVC pipeline ==="
