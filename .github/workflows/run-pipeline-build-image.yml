@@ -1,4 +1,5 @@
 name: DVC Pipeline in Docker & Push GHCR
+
 on:
   push:
     paths:
@@ -10,6 +11,10 @@ on:
       - 'requirements.txt'
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
 
@@ -20,8 +25,13 @@ jobs:
     permissions:
       packages: write
       contents: write
-    
+
     steps:
+      - name: Clean workspace permissions (prevent checkout errors)
+        run: |
+          sudo chown -R $(id -u):$(id -g) ${{ github.workspace }} 2>/dev/null || true
+          sudo rm -rf .dvc/cache 2>/dev/null || true
+
       - name: Check out the repo
         uses: actions/checkout@v4
         with:
@@ -35,37 +45,36 @@ jobs:
 
       - name: Run DVC inside Docker
         run: |
+          HOST_UID=$(id -u)
+          HOST_GID=$(id -g)
+
           docker run --rm \
             -v ${{ github.workspace }}:/app \
             -w /app \
+            -u ${HOST_UID}:${HOST_GID} \                  # ← Ключевой фикс
             -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
             -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
             -e AWS_REQUEST_CHECKSUM_CALCULATION=when_required \
             -e AWS_RESPONSE_CHECKSUM_VALIDATION=when_required \
             my-ml-image:latest \
             bash -c '
-              # Узнаем ID пользователя, которому принадлежит папка на хосте
-              HOST_USER=$(stat -c "%u:%g" /app);
-              
-              # Гарантируем, что при выходе из контейнера права вернутся владельцу
-              trap "chown -R $HOST_USER /app" EXIT;
-              
-              # Основной пайплайн
-              git config --global --add safe.directory /app && \
-              dvc pull && \
-              dvc repro && \
+              set -e
+              git config --global --add safe.directory /app
+
+              echo "=== Starting DVC pipeline ==="
+              dvc pull --force || echo "Warning: dvc pull completed with warnings"
+              dvc repro
               dvc push
+              echo "=== DVC pipeline finished successfully ==="
             '
+
       - name: Commit and Push changes (dvc.lock + reports)
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Обновляемся с remote
           git fetch origin
 
-          # Важно: ребейзим текущую ветку на origin, отдавая приоритет изменениям из CI
-          # (то, что только что сгенерировал dvc repro внутри Docker)
           if ! git rebase origin/${{ github.ref_name }} -X theirs; then
             echo "Rebase conflict detected → forcing CI version"
             git rebase --abort
@@ -73,15 +82,12 @@ jobs:
             git rebase origin/${{ github.ref_name }} -X theirs || true
           fi
 
-          # Добавляем наши свежие файлы
           git add dvc.lock reports/
 
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
             git commit -m "chore: update dvc.lock and reports from CI [skip ci]"
-            
-            # Пушим с force-with-lease (безопаснее force)
             git push --force-with-lease origin HEAD:${{ github.ref_name }}
           fi
 
