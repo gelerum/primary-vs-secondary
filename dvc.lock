@@ -145,3 +145,23 @@ stages:
       hash: md5
       md5: e731efb0499a202128e776bc4eae87a7
       size: 50561213
+  05_publish_processed:
+    cmd: python -m src.stages.05_publish_processed
+    deps:
+    - path: data/interim/04_mean_knn.parquet
+      hash: md5
+      md5: e731efb0499a202128e776bc4eae87a7
+      size: 50561213
+    - path: src/stages/05_publish_processed.py
+      hash: md5
+      md5: 32657b7ff0ca36ed485554791979e78a
+      size: 254
+    outs:
+    - path: data/processed/final.csv
+      hash: md5
+      md5: 445ba2a1459b47e42db7aaa4d07775c5
+      size: 370466401
+    - path: data/processed/final.parquet
+      hash: md5
+      md5: e731efb0499a202128e776bc4eae87a7
+      size: 50561213
