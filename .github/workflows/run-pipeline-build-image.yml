@@ -66,7 +66,7 @@ jobs:
 
               echo "=== Starting DVC pipeline ==="
               dvc pull --force || echo "Warning: dvc pull had some issues"
-              dvc repro
+              dvc repro --force
               dvc push
               echo "=== DVC pipeline finished successfully ==="
             '
