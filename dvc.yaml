@@ -37,14 +37,14 @@ stages:
     outs:
       - data/interim/03_price_discounted.parquet
 
-  04_mean_knn:
-    cmd: python -m src.stages.04_mean_knn
+  04_wnir:
+    cmd: python -m src.stages.04_wnir
     deps:
-      - src/stages/04_mean_knn.py
+      - src/stages/04_wnir.py
       - data/interim/03_price_discounted.parquet
-      - src/mean_knn
+      - src/wnir
     outs:
-      - data/interim/04_mean_knn.parquet
+      - data/interim/04_wnir.parquet
 
   05_publish_processed:
     cmd: python -m src.stages.05_publish_processed
