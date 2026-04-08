@@ -1,7 +1,9 @@
 import pandas as pd
 
-from src.mean_knn.mean_knn import compute_mean_knn_by_geo, compute_ratio_knn
+from src.wnir.wnir import compute_wnir, compute_ratio_wnir
 
+R = 500
+h = 100
 
 def main():
     df = pd.read_parquet("data/interim/03_price_discounted.parquet")
@@ -10,16 +12,10 @@ def main():
 
     df_secondary = df[df["market_type"] == "secondary"].copy()
 
-    df_primary, coords_primary, _ = compute_mean_knn_by_geo(df_primary, k=30, h=500)
-    df_secondary, _, tree_secondary = compute_mean_knn_by_geo(df_secondary, k=30, h=500)
+    df_primary, tree_primary = compute_wnir(df_primary, R=R, h=h)
+    df_secondary, tree_secondary = compute_wnir(df_secondary, R=R, h=h)
 
-    df_primary = compute_ratio_knn(
-        df_primary,
-        df_secondary,
-        coords_primary,
-        tree_secondary,
-        k=30,
-    )
+    df_primary = compute_ratio_wnir(df_primary, df_secondary, tree_secondary, R=R)
 
     df_mean_knn = pd.concat([df_primary, df_secondary])
 
