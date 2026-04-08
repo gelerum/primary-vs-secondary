@@ -46,20 +46,38 @@ stages:
     outs:
       - data/interim/04_mean_knn.parquet
 
-  05_publish_processed:
-    cmd: python -m src.stages.05_publish_processed
+  05_administrative_district:
+    cmd: python -m src.stages.05_administrative_district
     deps:
+      - src/stages/05_administrative_district.py
       - data/interim/04_mean_knn.parquet
-      - src/stages/05_publish_processed.py
+      - src/administrative_district
+      - data/complimentary/ao.cpg
+      - data/complimentary/ao.dbf
+      - data/complimentary/ao.prj
+      - data/complimentary/ao.qml
+      - data/complimentary/ao.qpj
+      - data/complimentary/ao.shp
+      - data/complimentary/ao.shx
+    outs:
+      - data/interim/05_administrative_district.parquet
+
+
+  06_publish_processed:
+    cmd: python -m src.stages.06_publish_processed
+    deps:
+      - data/interim/05_administrative_district.parquet
+      - src/stages/06_publish_processed.py
     outs:
       - data/processed/final.parquet
       - data/processed/final.csv
 
-  05_report:
-    cmd: python -m src.stages.05_report
+  06_report:
+    cmd: python -m src.stages.06_report
     deps:
-      - src/stages/05_report.py
+      - src/stages/06_report.py
       - src/report
-      - data/interim/04_mean_knn.parquet
+      - data/interim/05_administrative_district.parquet
+      
     params:
       - 02_geocode
