@@ -5,6 +5,7 @@ from src.wnir.wnir import compute_wnir, compute_ratio_wnir
 R = 500
 h = 100
 
+
 def main():
     df = pd.read_parquet("data/interim/03_price_discounted.parquet")
 
@@ -19,7 +20,7 @@ def main():
 
     df_mean_knn = pd.concat([df_primary, df_secondary])
 
-    df_mean_knn.to_parquet("data/interim/04_mean_knn.parquet", index=False)
+    df_mean_knn.to_parquet("data/interim/04_wnir.parquet", index=False)
 
 
 if __name__ == "__main__":
