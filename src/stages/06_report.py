@@ -11,7 +11,7 @@ def main():
 
     fig = plot_pdf_ecdf(
         df,
-        column="primary_to_secondary_price_ratio",
+        column="primary_to_secondary_wnir_ratio",
         title="Primary to Secondary Price Ratio",
         bin_size=0.1,
     )
@@ -20,11 +20,11 @@ def main():
     )
 
     fig = plot_pdf_ecdf_by_district(
-        df,
-        "primary_to_secondary_price_ratio",
-        "administrative_district",
-        0.1,
-        "Primary to Secondary Price Ratio by administrative district",
+        df=df,
+        column="primary_to_secondary_wnir_ratio",
+        district_col="administrative_district",
+        bin_size=0.1,
+        title="Primary to Secondary Price Ratio by administrative district",
     )
     fig.write_image(
         "reports/pdf_ecdf_primary_to_secondary_price_ratio_by_administrative_district.png",
@@ -36,7 +36,7 @@ def main():
         df,
         "latitude",
         "longitude",
-        "primary_to_secondary_price_ratio",
+        "primary_to_secondary_wnir_ratio",
         "Primary to Secondary Price Ratio heatmap",
         params["geo"]["longitude"]["min"],
         params["geo"]["longitude"]["max"],

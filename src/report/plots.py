@@ -48,10 +48,9 @@ def plot_pdf_ecdf_by_district(
     title,
 ):
 
-    height_per_district = 600
+    height_per_district = 800
     # Get unique districts, preserving NaN, and sort nicely
     districts = df[district_col].unique()
-    # Sort non-null districts and put Missing at the end
     sorted_districts = sorted([d for d in districts if pd.notna(d)])
     districts_list = sorted_districts + [np.nan]
 
@@ -100,6 +99,7 @@ def plot_pdf_ecdf_by_district(
             continue
 
         x = np.sort(data.values)
+        median = data.median()  # ← Добавлено
 
         # === PDF (Histogram) ===
         fig.add_trace(
@@ -112,6 +112,14 @@ def plot_pdf_ecdf_by_district(
             ),
             row=row,
             col=1,
+        )
+
+        # Вертикальная линия медианы на PDF
+        fig.add_vline(
+            x=median,
+            row=row,
+            col=1,
+            line=dict(color="orange", width=2.5),
         )
 
         # === ECDF ===
@@ -128,6 +136,14 @@ def plot_pdf_ecdf_by_district(
             col=1,
         )
 
+        # Вертикальная линия медианы на ECDF
+        fig.add_vline(
+            x=median,
+            row=row + 1,
+            col=1,
+            line=dict(color="orange", width=2.5),
+        )
+
         row += 2
 
     # Update layout
@@ -142,9 +158,7 @@ def plot_pdf_ecdf_by_district(
         margin=dict(t=80, b=40, l=80, r=40),
     )
 
-    fig.update_xaxes(
-        title_text=column, row=2 * n_districts, col=1
-    )  # only bottom x-axis label
+    fig.update_xaxes(title_text=column, row=2 * n_districts, col=1)
 
     return fig
 
