@@ -222,10 +222,10 @@ stages:
       hash: md5
       md5: 473e7d3573872631e74de71b0d6abb77
       size: 204
-    - path: data/interim/04_mean_knn.parquet
+    - path: data/interim/04_wnir.parquet
       hash: md5
-      md5: e731efb0499a202128e776bc4eae87a7
-      size: 50561213
+      md5: 80170e32ac0e803413c0380edd40825d
+      size: 49567350
     - path: src/administrative_district
       hash: md5
       md5: 21ad6b08922e796904ee26a6c73d7d2e.dir
@@ -233,49 +233,49 @@ stages:
       nfiles: 1
     - path: src/stages/05_administrative_district.py
       hash: md5
-      md5: c505167a3624611f2d5dd8aef3f5462a
-      size: 368
+      md5: ffa00172720d5500e0dfdc435057ad82
+      size: 364
     outs:
     - path: data/interim/05_administrative_district.parquet
       hash: md5
-      md5: 8fdc6a34a6f9adbbb55bf6b8c35ba5b4
-      size: 50911382
+      md5: 0fc8b759dd08acd1e2a30788f15166a9
+      size: 49917520
   06_publish_processed:
     cmd: python -m src.stages.06_publish_processed
     deps:
     - path: data/interim/05_administrative_district.parquet
       hash: md5
-      md5: 8fdc6a34a6f9adbbb55bf6b8c35ba5b4
-      size: 50911382
+      md5: 0fc8b759dd08acd1e2a30788f15166a9
+      size: 49917520
     - path: src/stages/06_publish_processed.py
       hash: md5
-      md5: 32657b7ff0ca36ed485554791979e78a
-      size: 254
+      md5: 9d33f0a1f985970001768a2b11a29bd5
+      size: 269
     outs:
     - path: data/processed/final.csv
       hash: md5
-      md5: 445ba2a1459b47e42db7aaa4d07775c5
-      size: 370466401
+      md5: c9e32d1d275cce208ffe1b3922152be6
+      size: 355663904
     - path: data/processed/final.parquet
       hash: md5
-      md5: e731efb0499a202128e776bc4eae87a7
-      size: 50561213
+      md5: 0fc8b759dd08acd1e2a30788f15166a9
+      size: 49917520
   06_report:
     cmd: python -m src.stages.06_report
     deps:
     - path: data/interim/05_administrative_district.parquet
       hash: md5
-      md5: 8fdc6a34a6f9adbbb55bf6b8c35ba5b4
-      size: 50911382
+      md5: 0fc8b759dd08acd1e2a30788f15166a9
+      size: 49917520
     - path: src/report
       hash: md5
-      md5: 3c9f177ae9a20efc874bc7607ba20a85.dir
-      size: 5681
+      md5: ea97b9d1941e4b06d27d11f8e96c7ecf.dir
+      size: 6076
       nfiles: 1
     - path: src/stages/06_report.py
       hash: md5
-      md5: 558138eb7a36aba75d9a3ebe0903c109
-      size: 1363
+      md5: 28563b02589eccd1a6f8b7f9634a40db
+      size: 1398
     params:
       params.yaml:
         02_geocode:
