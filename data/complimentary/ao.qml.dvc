@@ -1,0 +1,5 @@
+outs:
+- md5: b7295d726799835d27b9c5f77088ea46
+  size: 9186
+  hash: md5
+  path: ao.qml
