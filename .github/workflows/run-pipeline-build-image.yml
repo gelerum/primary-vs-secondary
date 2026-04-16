@@ -20,30 +20,56 @@ env:
 
 jobs:
   run_pipeline_and_push:
-    name: Run DVC in Docker, Commit, Push to GHCR
+    name: Run DVC in Docker & Commit
     runs-on: self-hosted
     permissions:
       packages: write
       contents: write
 
     steps:
-      - name: Clean workspace permissions (prevent checkout errors)
+      - name: Free Disk Space (Critical)
+        run: |
+          echo "=== Disk before cleanup ==="
+          df -h
+          
+          # Aggressive Docker cleanup
+          docker system prune -af --volumes || true
+          docker builder prune -af || true
+          
+          # Remove old images
+          docker image prune -af || true
+          
+          # Optional: clean old DVC cache (uncomment only if you have reliable remote)
+          # echo "Cleaning old DVC cache..."
+          # rm -rf .dvc/cache/* || true
+          
+          echo "=== Disk after cleanup ==="
+          df -h
+
+      - name: Clean workspace permissions
         run: |
           sudo chown -R $(id -u):$(id -g) ${{ github.workspace }} 2>/dev/null || true
-          sudo rm -rf .dvc/cache 2>/dev/null || true
+          sudo rm -rf .dvc/cache/.cache 2>/dev/null || true
 
       - name: Check out the repo
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker Image locally
-        run: docker build -t my-ml-image:latest .
+      - name: Build Docker Image (with cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: my-ml-image:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Run DVC inside Docker
+      - name: Run DVC Pipeline
         run: |
           HOST_UID=$(id -u)
           HOST_GID=$(id -g)
@@ -65,13 +91,13 @@ jobs:
               git config --global --add safe.directory /app
 
               echo "=== Starting DVC pipeline ==="
-              dvc pull --force || echo "Warning: dvc pull had some issues"
+              dvc pull --force
               dvc repro --force
               dvc push
               echo "=== DVC pipeline finished successfully ==="
             '
 
-      - name: Commit and Push changes (dvc.lock + reports)
+      - name: Commit and Push changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -79,10 +105,8 @@ jobs:
           git fetch origin
 
           if ! git rebase origin/${{ github.ref_name }} -X theirs; then
-            echo "Rebase conflict detected → forcing CI version"
             git rebase --abort
             git reset --hard origin/${{ github.ref_name }}
-            git rebase origin/${{ github.ref_name }} -X theirs || true
           fi
 
           git add dvc.lock reports/
