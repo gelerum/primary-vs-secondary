@@ -15,7 +15,7 @@ WORKDIR /app
 
 COPY requirements.txt .
 
-RUN pip install -r requirements.txt
+RUN pip install -i https://mirror.yandex.ru/pypi/simple -r requirements.txt
 
 COPY . .
 
