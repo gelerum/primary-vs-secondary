@@ -69,12 +69,13 @@ jobs:
         with:
           context: .
           load: true
-          tags: ${{ env.IMAGE_NAME }}:latest
+          tags: my-ml-image:latest
+          target: final                    # ← Important
           cache-from: |
-            type=local,src=${{ env.BUILD_CACHE_PATH }}
+            type=local,src=/tmp/.buildx-cache
             type=gha
           cache-to: |
-            type=local,dest=${{ env.BUILD_CACHE_PATH }},mode=max
+            type=local,dest=/tmp/.buildx-cache,mode=max
             type=gha,mode=min
 
       - name: Run DVC Pipeline
