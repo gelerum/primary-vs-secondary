@@ -29,31 +29,34 @@ jobs:
       packages: write
 
     steps:
-      - name: Free Disk Space
+      - name: Aggressive Disk Cleanup (Critical)
         run: |
-          echo "=== Disk before cleanup ==="
+          echo "=== Disk BEFORE cleanup ==="
           df -h
-          docker system prune -af --volumes || true
-          docker builder prune -af || true
-          echo "=== Disk after cleanup ==="
+          echo "=== Cleaning Docker ==="
+          
+          docker system prune -af --volumes
+          docker builder prune -af
+          docker image prune -af
+          
+          # Extra aggressive cleanup
+          docker volume prune -f
+          rm -rf /var/lib/docker/tmp/* 2>/dev/null || true
+          
+          # Clean old build cache (this was likely the main culprit)
+          echo "Cleaning build cache..."
+          rm -rf ${BUILD_CACHE_PATH}/*
+          mkdir -p ${BUILD_CACHE_PATH}
+          
+          echo "=== Disk AFTER cleanup ==="
           df -h
 
       - name: Fix Workspace Permissions
         run: |
-          echo "=== Fixing workspace permissions ==="
           WORKSPACE="${{ github.workspace }}"
-
-          chown -R "$(id -u):$(id -g)" "$WORKSPACE" 2>/dev/null && echo "✓ chown without sudo" || {
-            echo "→ Trying sudo..."
-            sudo -n chown -R "$(id -u):$(id -g)" "$WORKSPACE" 2>/dev/null && echo "✓ chown with sudo" || \
-            echo "⚠️ chown failed (often harmless on self-hosted runners)"
-          }
-
-          # Fix .git and DVC directories
-          chown -R "$(id -u):$(id -g)" .git 2>/dev/null || sudo -n chown -R "$(id -u):$(id -g)" .git 2>/dev/null || true
-          mkdir -p .dvc/cache
-          chmod -R u+rwX .dvc 2>/dev/null || true
-          echo "=== Permission fixing completed ==="
+          chown -R "$(id -u):$(id -g)" "$WORKSPACE" 2>/dev/null || sudo -n chown -R "$(id -u):$(id -g)" "$WORKSPACE" || true
+          chown -R "$(id -u):$(id -g)" .git 2>/dev/null || sudo -n chown -R "$(id -u):$(id -g)" .git || true
+          mkdir -p .dvc/cache && chmod -R u+rwX .dvc 2>/dev/null || true
 
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -64,19 +67,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker Image (Fast Local Cache)
+      - name: Build Docker Image (Optimized for Low Disk Space)
         uses: docker/build-push-action@v6
         with:
           context: .
           load: true
-          tags: my-ml-image:latest
-          target: final                    # ← Important
+          tags: ${{ env.IMAGE_NAME }}:latest
+          target: final                          # Make sure this matches your Dockerfile
           cache-from: |
-            type=local,src=/tmp/.buildx-cache
+            type=local,src=${{ env.BUILD_CACHE_PATH }}
             type=gha
           cache-to: |
-            type=local,dest=/tmp/.buildx-cache,mode=max
+            type=local,dest=${{ env.BUILD_CACHE_PATH }},mode=min,compression=zstd
             type=gha,mode=min
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
 
       - name: Run DVC Pipeline
         run: |
@@ -115,3 +120,7 @@ jobs:
             git push --force-with-lease origin HEAD:${{ github.ref_name }}
             echo "Changes pushed successfully"
           fi
+
+      - name: Final Disk Status
+        if: always()
+        run: df -h
