@@ -1,8 +1,6 @@
 [core]
     remote = storage
 ['remote "storage"']
-    url = s3://870969472cc6-primary-vs-secondary
+    url = s3://870969472cc6-pvs
     endpointurl = https://s3.ru1.storage.beget.cloud
     use_ssl = true
-    access_key_id = 85F9NW7CXKRVYPDJWUVL
-    secret_access_key = SsztbKNYByofz0mcVwBI6XwoHsGlVAAJdxDJVMPH

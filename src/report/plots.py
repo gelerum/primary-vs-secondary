@@ -105,7 +105,6 @@ def plot_pdf_ecdf_by_district(
         fig.add_trace(
             go.Histogram(
                 x=x,
-                histnorm="density",
                 xbins=dict(size=bin_size),
                 name=f"PDF - {district_label}",
                 marker_color="#1f77b4",
