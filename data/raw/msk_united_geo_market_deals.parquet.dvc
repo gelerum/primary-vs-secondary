@@ -1,0 +1,5 @@
+outs:
+- md5: 2e0c03633c794dbf0c2749209454c0a5
+  size: 336223981
+  hash: md5
+  path: msk_united_geo_market_deals.parquet

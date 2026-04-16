@@ -28,25 +28,6 @@ jobs:
       contents: write
 
     steps:
-      - name: Free Disk Space (Critical)
-        run: |
-          echo "=== Disk before cleanup ==="
-          df -h
-          
-          # Aggressive Docker cleanup
-          docker system prune -af --volumes || true
-          docker builder prune -af || true
-          
-          # Remove old images
-          docker image prune -af || true
-          
-          # Optional: clean old DVC cache (uncomment only if you have reliable remote)
-          # echo "Cleaning old DVC cache..."
-          # rm -rf .dvc/cache/* || true
-          
-          echo "=== Disk after cleanup ==="
-          df -h
-
       - name: Clean workspace permissions
         run: |
           sudo chown -R $(id -u):$(id -g) ${{ github.workspace }} 2>/dev/null || true
