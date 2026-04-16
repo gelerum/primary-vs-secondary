@@ -6,6 +6,7 @@ on:
       - 'src/**'
       - 'Dockerfile'
       - 'dvc.yaml'
+      - 'dvc.lock'
       - 'params.yaml'
       - '.github/workflows/run-pipeline-build-image.yml'
       - 'requirements.txt'
