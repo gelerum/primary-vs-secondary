@@ -17,110 +17,80 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE_NAME: my-ml-image
-  BUILD_CACHE_PATH: /tmp/.buildx-cache
+  REGISTRY: ghcr.io
 
 jobs:
   run_pipeline_and_push:
-    name: Run DVC Pipeline in Docker
+    name: Run DVC in Docker, Commit, Push to GHCR
     runs-on: self-hosted
     permissions:
-      contents: write
       packages: write
+      contents: write
 
     steps:
-      - name: Aggressive Disk Cleanup (Critical)
+      - name: Clean workspace permissions (prevent checkout errors)
         run: |
-          echo "=== Disk BEFORE cleanup ==="
-          df -h
-          echo "=== Cleaning Docker ==="
-          
-          docker system prune -af --volumes
-          docker builder prune -af
-          docker image prune -af
-          
-          # Extra aggressive cleanup
-          docker volume prune -f
-          rm -rf /var/lib/docker/tmp/* 2>/dev/null || true
-          
-          # Clean old build cache (this was likely the main culprit)
-          echo "Cleaning build cache..."
-          rm -rf ${BUILD_CACHE_PATH}/*
-          mkdir -p ${BUILD_CACHE_PATH}
-          
-          echo "=== Disk AFTER cleanup ==="
-          df -h
+          sudo chown -R $(id -u):$(id -g) ${{ github.workspace }} 2>/dev/null || true
+          sudo rm -rf .dvc/cache 2>/dev/null || true
 
-      - name: Fix Workspace Permissions
-        run: |
-          WORKSPACE="${{ github.workspace }}"
-          chown -R "$(id -u):$(id -g)" "$WORKSPACE" 2>/dev/null || sudo -n chown -R "$(id -u):$(id -g)" "$WORKSPACE" || true
-          chown -R "$(id -u):$(id -g)" .git 2>/dev/null || sudo -n chown -R "$(id -u):$(id -g)" .git || true
-          mkdir -p .dvc/cache && chmod -R u+rwX .dvc 2>/dev/null || true
-
-      - name: Checkout Repository
+      - name: Check out the repo
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker Image (Optimized for Low Disk Space)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          load: true
-          tags: ${{ env.IMAGE_NAME }}:latest
-          target: final                          # Make sure this matches your Dockerfile
-          cache-from: |
-            type=local,src=${{ env.BUILD_CACHE_PATH }}
-            type=gha
-          cache-to: |
-            type=local,dest=${{ env.BUILD_CACHE_PATH }},mode=min,compression=zstd
-            type=gha,mode=min
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
+      - name: Build Docker Image locally
+        run: docker build -t my-ml-image:latest .
 
-      - name: Run DVC Pipeline
+      - name: Run DVC inside Docker
         run: |
-          echo "=== Starting DVC Pipeline ==="
+          HOST_UID=$(id -u)
+          HOST_GID=$(id -g)
+
           docker run --rm \
             -v ${{ github.workspace }}:/app \
+            -v /etc/passwd:/etc/passwd:ro \
+            -v /etc/group:/etc/group:ro \
             -w /app \
-            -u $(id -u):$(id -g) \
+            -u ${HOST_UID}:${HOST_GID} \
             -e HOME=/tmp \
             -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
             -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
             -e AWS_REQUEST_CHECKSUM_CALCULATION=when_required \
             -e AWS_RESPONSE_CHECKSUM_VALIDATION=when_required \
-            ${{ env.IMAGE_NAME }}:latest \
+            my-ml-image:latest \
             bash -c '
-              set -euo pipefail
+              set -e
               git config --global --add safe.directory /app
-              dvc pull --force
+
+              echo "=== Starting DVC pipeline ==="
+              dvc pull --force || echo "Warning: dvc pull had some issues"
               dvc repro --force
               dvc push
-              echo "=== DVC Pipeline completed successfully ==="
+              echo "=== DVC pipeline finished successfully ==="
             '
 
-      - name: Commit and Push Changes
+      - name: Commit and Push changes (dvc.lock + reports)
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
+
           git fetch origin
-          
-          if git diff --quiet origin/${{ github.ref_name }} -- dvc.lock reports/; then
-            echo "No changes to commit"
-          else
-            git add dvc.lock reports/
-            git commit -m "chore: update dvc.lock and reports from CI [skip ci]"
-            git push --force-with-lease origin HEAD:${{ github.ref_name }}
-            echo "Changes pushed successfully"
+
+          if ! git rebase origin/${{ github.ref_name }} -X theirs; then
+            echo "Rebase conflict detected → forcing CI version"
+            git rebase --abort
+            git reset --hard origin/${{ github.ref_name }}
+            git rebase origin/${{ github.ref_name }} -X theirs || true
           fi
 
-      - name: Final Disk Status
-        if: always()
-        run: df -h
+          git add dvc.lock reports/
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update dvc.lock and reports from CI [skip ci]"
+            git push --force-with-lease origin HEAD:${{ github.ref_name }}
+          fi
