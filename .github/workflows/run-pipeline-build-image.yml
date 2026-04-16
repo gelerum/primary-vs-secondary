@@ -18,48 +18,76 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
+  IMAGE_NAME: my-ml-image
+  BUILD_CACHE_PATH: /tmp/.buildx-cache
 
 jobs:
   run_pipeline_and_push:
-    name: Run DVC in Docker & Commit
+    name: Run DVC Pipeline in Docker
     runs-on: self-hosted
     permissions:
-      packages: write
       contents: write
+      packages: write
 
     steps:
-      - name: Clean workspace permissions
+      - name: Free Disk Space (Critical)
         run: |
-          sudo chown -R $(id -u):$(id -g) ${{ github.workspace }} 2>/dev/null || true
-          sudo rm -rf .dvc/cache/.cache 2>/dev/null || true
+          echo "=== Disk usage before cleanup ==="
+          df -h
+          
+          docker system prune -af --volumes || true
+          docker builder prune -af || true
+          docker image prune -af || true
+          
+          echo "=== Disk usage after cleanup ==="
+          df -h
 
-      - name: Check out the repo
+      - name: Clean Workspace Permissions
+        run: |
+          sudo chown -R $(id -u):$(id -g) ${{ github.workspace }}
+          rm -rf .dvc/cache/.cache 2>/dev/null || true
+          echo "Workspace permissions fixed."
+
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      - name: Cleanup Old Build Cache
+        run: |
+          echo "Current build cache size:"
+          du -sh ${BUILD_CACHE_PATH} 2>/dev/null || echo "No cache yet"
+          # Optional: remove cache older than 7 days to prevent unbounded growth
+          find ${BUILD_CACHE_PATH} -type f -mtime +7 -delete 2>/dev/null || true
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker Image (with cache)
+      - name: Build Docker Image (Optimized Cache)
         uses: docker/build-push-action@v6
         with:
           context: .
           load: true
-          tags: my-ml-image:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ env.IMAGE_NAME }}:latest
+          cache-from: |
+            type=local,src=${{ env.BUILD_CACHE_PATH }}
+            type=gha
+          cache-to: |
+            type=local,dest=${{ env.BUILD_CACHE_PATH }},mode=max
+            type=gha,mode=min
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
 
       - name: Run DVC Pipeline
         run: |
+          echo "=== Starting DVC Pipeline in Docker ==="
+
           HOST_UID=$(id -u)
           HOST_GID=$(id -g)
 
           docker run --rm \
             -v ${{ github.workspace }}:/app \
-            -v /etc/passwd:/etc/passwd:ro \
-            -v /etc/group:/etc/group:ro \
             -w /app \
             -u ${HOST_UID}:${HOST_GID} \
             -e HOME=/tmp \
@@ -67,35 +95,50 @@ jobs:
             -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
             -e AWS_REQUEST_CHECKSUM_CALCULATION=when_required \
             -e AWS_RESPONSE_CHECKSUM_VALIDATION=when_required \
-            my-ml-image:latest \
+            ${{ env.IMAGE_NAME }}:latest \
             bash -c '
-              set -e
+              set -euo pipefail
+              
               git config --global --add safe.directory /app
+              git config --global user.name "github-actions[bot]"
+              git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-              echo "=== Starting DVC pipeline ==="
+              echo "Pulling latest DVC data..."
               dvc pull --force
+
+              echo "Reproducing pipeline..."
               dvc repro --force
+
+              echo "Pushing DVC artifacts..."
               dvc push
-              echo "=== DVC pipeline finished successfully ==="
+
+              echo "=== DVC Pipeline completed successfully ==="
             '
 
-      - name: Commit and Push changes
+      - name: Commit and Push Changes
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          echo "=== Checking for changes to commit ==="
 
           git fetch origin
 
-          if ! git rebase origin/${{ github.ref_name }} -X theirs; then
-            git rebase --abort
-            git reset --hard origin/${{ github.ref_name }}
-          fi
-
-          git add dvc.lock reports/
-
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "chore: update dvc.lock and reports from CI [skip ci]"
+          # Safer approach than complex rebase
+          if ! git diff --quiet origin/${{ github.ref_name }} -- dvc.lock reports/; then
+            git add dvc.lock reports/
+            
+            git commit -m "chore: update dvc.lock and reports from CI [skip ci]" || {
+              echo "Nothing to commit"
+              exit 0
+            }
+            
+            echo "Pushing changes..."
             git push --force-with-lease origin HEAD:${{ github.ref_name }}
+            echo "Successfully pushed updated dvc.lock and reports."
+          else
+            echo "No changes to dvc.lock or reports. Nothing to commit."
           fi
+
+      - name: Final Disk Usage
+        if: always()
+        run: |
+          echo "=== Final disk usage ==="
+          df -h
