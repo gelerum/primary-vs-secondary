@@ -3,10 +3,14 @@ data/interim/*
 data/processed/*
 data/raw/*
 
+
 !data/cache/.gitkeep
 !data/interim/.gitkeep
 !data/processed/.gitkeep
 !data/raw/.gitkeep
+
+!*.dvc
+!.dvc/config
 
 secrets/*
 

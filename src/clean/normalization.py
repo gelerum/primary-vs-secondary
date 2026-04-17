@@ -43,6 +43,7 @@ def normalize_datasets(dfs):
 
         if "flat_type" in df.columns:
             df["flat_type"] = df["flat_type"].map(FLAT_TYPE_MAP)
+            df.loc[df["flat_type"] == "studio", "room_count"] = 0
 
         df["housing_type"] = df["flat_type"].apply(_assign_housing_type)
 

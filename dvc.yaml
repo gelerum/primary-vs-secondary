@@ -19,7 +19,7 @@ stages:
     cmd: python -m src.stages.02_geocode
     deps:
       - data/interim/01_cleaned.parquet
-      - secrets/geocoding/ya_api_keys.csv
+      # - secrets/geocoding/ya_api_keys.csv
       - src/stages/02_geocode.py
       - src/geocode
     params:
@@ -38,25 +38,47 @@ stages:
     outs:
       - data/interim/03_price_discounted.parquet
 
-  04_mean_knn:
-    cmd: python -m src.stages.04_mean_knn
+  04_wnir:
+    cmd: python -m src.stages.04_wnir
     deps:
-      - src/stages/04_mean_knn.py
+      - src/stages/04_wnir.py
       - data/interim/03_price_discounted.parquet
-      - src/mean_knn
+      - src/wnir
     outs:
-      - data/interim/04_mean_knn.parquet
+      - data/interim/04_wnir.parquet
 
-  publish_processed:
-    cmd: |
-      cp data/interim/04_mean_knn.parquet data/processed/final.parquet
-      python -c "
-      import pandas as pd
-      df = pd.read_parquet('data/interim/04_mean_knn.parquet')
-      df.to_csv('data/processed/final.csv', index=False)
-      "
+  05_administrative_district:
+    cmd: python -m src.stages.05_administrative_district
     deps:
-      - data/interim/04_mean_knn.parquet
+      - src/stages/05_administrative_district.py
+      - data/interim/04_wnir.parquet
+      - src/administrative_district
+      - data/complimentary/ao.cpg
+      - data/complimentary/ao.dbf
+      - data/complimentary/ao.prj
+      - data/complimentary/ao.qml
+      - data/complimentary/ao.qpj
+      - data/complimentary/ao.shp
+      - data/complimentary/ao.shx
+    outs:
+      - data/interim/05_administrative_district.parquet
+
+
+  06_publish_processed:
+    cmd: python -m src.stages.06_publish_processed
+    deps:
+      - data/interim/05_administrative_district.parquet
+      - src/stages/06_publish_processed.py
     outs:
       - data/processed/final.parquet
       - data/processed/final.csv
+
+  06_report:
+    cmd: python -m src.stages.06_report
+    deps:
+      - src/stages/06_report.py
+      - src/report
+      - data/interim/05_administrative_district.parquet
+      
+    params:
+      - 02_geocode
