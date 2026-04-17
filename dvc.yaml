@@ -8,6 +8,7 @@ stages:
       - data/raw/Dataset_SCO_KVM_MONS_GRC_IZD_DMA_MTK_20250805.csv
       - data/raw/Etagi_secondary_classified_dataset_20250805.csv
       - data/raw/Etagi_secondary_dataset_20250805.csv
+      - data/raw/msk_houses_deals_ds.csv
       - data/raw/msk_united_geo_market_deals.parquet
     params:
       - 01_clean

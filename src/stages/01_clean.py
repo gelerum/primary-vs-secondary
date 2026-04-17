@@ -3,6 +3,7 @@ from src.clean.adapters import (
     DF2_ADAPTER,
     DF3_ADAPTER,
     DF4_ADAPTER,
+    DF5_ADAPTER,
     adapt_dataframes,
 )
 from src.clean.concat import concat_dfs
@@ -28,7 +29,7 @@ def main():
 
     dfs = read_dfs()
 
-    adapters = [DF1_ADAPTER, DF2_ADAPTER, DF3_ADAPTER, DF4_ADAPTER]
+    adapters = [DF1_ADAPTER, DF2_ADAPTER, DF3_ADAPTER, DF4_ADAPTER, DF5_ADAPTER]
     dfs = adapt_dataframes(dfs, adapters)
 
     dfs = normalize_datasets(dfs)

@@ -97,6 +97,38 @@ DF4_ADAPTER = {
 }
 
 
+DF5_ADAPTER = {
+    "address": lambda df: df["address_fias"].fillna(df["address"]),
+    "longitude": lambda df: pd.to_numeric(df["longitude"], errors="coerce"),
+    "latitude": lambda df: pd.to_numeric(df["latitude"], errors="coerce"),
+    "area": lambda df: pd.to_numeric(df["totalArea"], errors="coerce"),
+    "room_count": lambda df: pd.to_numeric(df["roomsOffered"], errors="coerce"),
+    "floor": lambda df: pd.to_numeric(df["floorsOffered"], errors="coerce"),
+    "floor_count": lambda df: pd.to_numeric(df["floorsTotal"], errors="coerce"),
+    "market_type": lambda df: (
+        df["flatType"]
+        .replace({"SECONDARY": "secondary", "NEW_SECONDARY": "secondary"})
+        .astype("string")
+    ),
+    "housing_type": pd.NA,
+    "flat_type": lambda df: "FLAT",
+    "ceiling_height": lambda df: pd.to_numeric(df["ceilingHeight"], errors="coerce"),
+    "build_year": lambda df: pd.to_numeric(df["buildYear"], errors="coerce"),
+    "balcony": lambda df: (
+        df["balconyType"].notna() & df["balconyType"].astype(str).ne("UNKNOWN")
+    ).astype("Int64"),
+    "price": lambda df: pd.to_numeric(df["lastPrice"], errors="coerce"),
+    "price_per_square_meter": lambda df: (
+        pd.to_numeric(df["lastPrice"], errors="coerce")
+        / pd.to_numeric(df["totalArea"], errors="coerce")
+    ),
+    "date": lambda df: pd.to_datetime(
+        df["lastDate"].fillna(df["creationDate"]), errors="coerce"
+    ).dt.tz_localize(None).dt.normalize(),
+}
+
+
+
 def _adapt_dataframe(df, adapter):
     adapted = pd.DataFrame()
 
