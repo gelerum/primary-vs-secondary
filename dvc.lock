@@ -25,8 +25,8 @@ stages:
       size: 336223981
     - path: src/clean
       hash: md5
-      md5: 39c12b27c9cf42216bf88af85e70940a.dir
-      size: 10170
+      md5: 7ef6e775e460f47d35b2d64683124119.dir
+      size: 10186
       nfiles: 7
     - path: src/stages/01_clean.py
       hash: md5
@@ -50,24 +50,24 @@ stages:
     outs:
     - path: data/interim/01_cleaned.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: e2eb0f350140185ebda0ad35946158a0
+      size: 49942022
   02_geocode:
     cmd: python -m src.stages.02_geocode
     deps:
     - path: data/interim/01_cleaned.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: e2eb0f350140185ebda0ad35946158a0
+      size: 49942022
     - path: src/geocode
       hash: md5
-      md5: 0f0b5b11ba300c1444a1a5b5cb7b88ec.dir
-      size: 5983
+      md5: 4c8201ee9ed38be0b2f62acf76486756.dir
+      size: 5964
       nfiles: 3
     - path: src/stages/02_geocode.py
       hash: md5
-      md5: f6d0d05380478c4661a914bc90ac8f92
-      size: 822
+      md5: 4f579f7a9becb4ad67029ff51f04babe
+      size: 1196
     params:
       params.yaml:
         02_geocode:
@@ -85,15 +85,15 @@ stages:
       size: 3453101
     - path: data/interim/02_geocoded.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 12f1c199a63844ef28df1b726e0984d0
+      size: 39785014
   03_price_discount:
     cmd: python -m src.stages.03_price_discount
     deps:
     - path: data/interim/02_geocoded.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 12f1c199a63844ef28df1b726e0984d0
+      size: 39785014
     - path: src/price_discount
       hash: md5
       md5: 3adc23d7e9a7402cbf3469c13c2b991b.dir

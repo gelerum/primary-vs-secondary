@@ -1,8 +1,11 @@
 import pandas as pd
 
+
 def _read_msk_houses_deals():
     df = pd.read_csv("data/raw/msk_houses_deals_ds.csv")
     df = df.loc[df["flatType"].ne("flatType") & df["address"].ne("address")].copy()
+    return df
+
 
 def read_dfs():
     df1 = pd.read_csv("data/raw/Dataset_SCO_KVM_MONS_GRC_IZD_DMA_MTK_20250805.csv")

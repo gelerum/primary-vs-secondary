@@ -1,4 +1,3 @@
-import pandas as pd
 from .geocode_parser import geocode_df_yandex
 
 
@@ -10,6 +9,7 @@ def geocode_addresses(
     # api_keys = pd.read_csv(api_keys_path)["key"].astype(str).str.strip().tolist()
 
     df_to_geocode = df.loc[df["latitude"].isna() | df["longitude"].isna(), ["address"]]
+
     df_geocoded = geocode_df_yandex(
         df_to_geocode, None, checkpoint_path=checkpoint_path
     )

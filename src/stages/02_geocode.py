@@ -10,6 +10,9 @@ def main():
 
     df_clean = pd.read_parquet("data/interim/01_cleaned.parquet")
 
+    # Захардкодил очкистку от нулевых координат, чтобы не вызывать геокодинг. Не помню, почему его не хочу запускать. Мб из-за того что нужно преедавать api адреса на сервер
+    df_clean = df_clean.dropna(subset=["latitude", "longitude"])
+
     df_geocoded = geocode_addresses(
         df_clean,
         api_keys_path="secrets/geocoding/ya_api_keys.csv",
