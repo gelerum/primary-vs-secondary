@@ -20,4 +20,11 @@
       min: 55.15
       max: 56.05
 03_price_discount:
-04_mean_knn:
+04_wnir:
+  h: 100
+  R:
+    min: 100
+    min-med: 500
+    med: 1000
+    max-med: 5000
+    max: 10000

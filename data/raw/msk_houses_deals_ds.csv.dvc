@@ -1,0 +1,5 @@
+outs:
+- md5: 52d212d0a59bfcc506e9e861c7936c36
+  size: 402792115
+  hash: md5
+  path: msk_houses_deals_ds.csv
