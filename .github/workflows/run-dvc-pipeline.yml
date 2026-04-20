@@ -20,9 +20,12 @@ jobs:
   run_pipeline_and_commit:
     name: Run DVC in Docker and Commit Changes
     runs-on: self-hosted
+
+    # Run always except when workflow_run failed
     if: |
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
+
     permissions:
       contents: write
       packages: read
@@ -33,6 +36,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Determine correct image tag depending on trigger
+      - name: Set image tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "IMAGE_TAG=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_ENV
+          else
+            echo "IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
+          fi
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -42,7 +54,14 @@ jobs:
 
       - name: Pull Docker Image
         run: |
-          docker pull ghcr.io/${{ github.repository_owner }}/my-ml-image:latest
+          docker pull ghcr.io/${{ github.repository_owner }}/my-ml-image:${IMAGE_TAG}
+
+      # 🔥 Fix permissions BEFORE container runs
+      - name: Prepare DVC cache (host)
+        run: |
+          sudo mkdir -p /nix/persistent/dvc-cache
+          sudo chown -R $(id -u):$(id -g) /nix/persistent/dvc-cache
+          sudo chmod -R u+rwX /nix/persistent/dvc-cache
 
       - name: Run DVC Pipeline inside Docker
         run: |
@@ -56,41 +75,38 @@ jobs:
             --env "AWS_REQUEST_CHECKSUM_CALCULATION=when_required" \
             --env "AWS_RESPONSE_CHECKSUM_VALIDATION=when_required" \
             --env "HOME=/app/.home" \
-            ghcr.io/${{ github.repository_owner }}/my-ml-image:latest \
+            ghcr.io/${{ github.repository_owner }}/my-ml-image:${IMAGE_TAG} \
             bash -c '
               set -e
+
               echo "=== Configuring environment inside container ==="
 
-              # Create a proper writable HOME directory (recommended for NixOS)
               mkdir -p /app/.home
-              chown -R "$(id -u):$(id -g)" /app/.home
               chmod 700 /app/.home
 
               git config --global --add safe.directory /app
-
               git config --global user.name "github-actions[bot]"
               git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-              echo "=== DVC cache setup ==="
-              mkdir -p /dvc-cache
-              dvc cache dir /dvc-cache
-
               echo "=== Starting DVC pipeline ==="
-              dvc pull --force
+
+              dvc pull --force --cache-dir /dvc-cache
               dvc repro --force
-              dvc push
+              dvc push --cache-dir /dvc-cache
 
               echo "=== DVC pipeline finished successfully ==="
             '
+
       - name: Commit and Push changes (dvc.lock + reports)
         run: |
           set -e
+
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git pull --rebase
 
-          git add dvc.lock reports/
+          git add dvc.lock reports/ || true
 
           if git diff --staged --quiet; then
             echo "No changes to commit"
