@@ -34,8 +34,6 @@ jobs:
 
       - name: Run DVC Pipeline inside Docker
         run: |
-          # This command is the heart of the solution. It manually replicates
-          # what `jobs.container` does, but in a way that works.
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             --volume "${{ github.workspace }}:/app" \
@@ -45,20 +43,33 @@ jobs:
             --env "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
             --env "AWS_REQUEST_CHECKSUM_CALCULATION=when_required" \
             --env "AWS_RESPONSE_CHECKSUM_VALIDATION=when_required" \
+            --env "HOME=/app" \                     # <-- This is the key fix
             my-ml-image:latest \
             bash -c '
               set -e
               echo "=== Configuring environment inside container ==="
+
+              # Make Git happy with the mounted workspace
               git config --global --add safe.directory /app
+
+              # Set a real home directory so .gitconfig can be written
+              mkdir -p /tmp/home
+              export HOME=/tmp/home
+
+              # Or alternatively, set git config directly without relying on ~/.gitconfig
+              git config --global user.name "github-actions[bot]"
+              git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+              echo "=== DVC cache setup ==="
               dvc cache dir /dvc-cache
 
               echo "=== Starting DVC pipeline ==="
               dvc pull --force
               dvc repro --force
               dvc push
+
               echo "=== DVC pipeline finished successfully ==="
             '
-
       - name: Commit and Push changes (dvc.lock + reports)
         run: |
           set -e
