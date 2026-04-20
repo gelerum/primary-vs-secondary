@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 
 RUN python -m pip install --upgrade pip && \
-    python -m pip install --prefix=/install -r requirements.txt
+    python -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple --prefix=/install -r requirements.txt
 
 
 # Final stage
