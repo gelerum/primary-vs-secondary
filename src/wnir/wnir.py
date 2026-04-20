@@ -2,20 +2,26 @@ import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
 
-EARTH_RADIUS = 6371000
+EARTH_RADIUS = 6371000.0  # meters
 
 
 def compute_wnir_for_market(
     df: pd.DataFrame,
-    tree: BallTree,
     R: float,
     h: float,
     price_col: str = "price_per_square_meter_normalized",
+    leaf_size: int = 40,
 ) -> pd.DataFrame:
+    """
+    Compute Weighted Nearest Item Ratio (WNIR) for a market (primary or secondary).
+    - Skips coordinate groups with >= 5000 identical locations.
+    - Rebuilds BallTree on filtered data to guarantee index alignment.
+    """
     df = df.copy()
     output_col = f"wnir_{R}"
     count_col = f"wnir_neighbours_count_{R}"
 
+    # Count duplicates per exact coordinate
     coord_counts = df.groupby(["latitude", "longitude"])["latitude"].transform("count")
     mask = coord_counts < 5000
 
@@ -24,14 +30,19 @@ def compute_wnir_for_market(
         df[count_col] = 0
         return df
 
-    df_clear = df.loc[mask]
+    df_clear = df.loc[mask].copy()
+
+    # Build coordinates and tree ONLY on clear data
     coords_rad = np.radians(
         df_clear[["latitude", "longitude"]].values.astype(np.float32)
     )
+    tree = BallTree(coords_rad, metric="haversine", leaf_size=leaf_size)
+
     values = df_clear[price_col].values.astype(np.float32)
 
     radius_rad = R / EARTH_RADIUS
 
+    # Query all points at once (returns list of arrays)
     indices_array, dists_array_rad = tree.query_radius(
         coords_rad, r=radius_rad, return_distance=True, sort_results=True
     )
@@ -53,12 +64,16 @@ def compute_wnir_for_market(
         neighbor_vals = values[valid_inds]
         neighbor_counts[i] = len(dists_m)
 
+        # Exponential kernel weights
         weights = np.exp(-dists_m / h)
-        wnir[i] = np.dot(weights, neighbor_vals) / weights.sum()
+        weight_sum = weights.sum()
 
+        if weight_sum > 0:
+            wnir[i] = np.dot(weights, neighbor_vals) / weight_sum
+
+    # Write results back
     df[output_col] = np.nan
     df[count_col] = -1
-
     df.loc[mask, output_col] = wnir
     df.loc[mask, count_col] = neighbor_counts
 
@@ -72,7 +87,9 @@ def compute_ratio_wnir(
     tree_secondary: BallTree,
     R: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-
+    """
+    Compute context statistics and ratio between primary and secondary markets.
+    """
     wnir_col = f"wnir_{R}"
 
     def _vectorized_calculate_stats(
@@ -91,15 +108,21 @@ def compute_ratio_wnir(
         coords_target = np.radians(
             df_target[["latitude", "longitude"]].values.astype(np.float32)
         )
-        values_context = df_context[wnir_col].astype("float32")
+        values_context = df_context[wnir_col].astype(np.float32).values
+
         radius_rad = R / EARTH_RADIUS
 
         indices_array = tree_context.query_radius(
             coords_target, r=radius_rad, return_distance=False
         )
 
+        if len(indices_array) == 0 or all(len(inds) == 0 for inds in indices_array):
+            empty = {col: np.nan for col in list(context_cols.values()) + [ratio_col]}
+            return pd.DataFrame(empty, index=df_target.index)
+
+        # Build long format for groupby
         target_indices = np.repeat(
-            df_target.index, [len(inds) for inds in indices_array]
+            df_target.index.to_numpy(), [len(inds) for inds in indices_array]
         )
         context_indices = np.concatenate(indices_array)
 
@@ -111,35 +134,37 @@ def compute_ratio_wnir(
         )
 
         long_df = long_df.join(
-            values_context.rename("context_wnir"), on="context_original_idx"
+            pd.Series(values_context, index=df_context.index, name="context_wnir"),
+            on="context_original_idx",
         )
 
-        if long_df.empty:
-            empty_data = {
-                col: np.nan for col in list(context_cols.values()) + [ratio_col]
-            }
-            return pd.DataFrame(empty_data, index=df_target.index)
-
+        # Aggregate statistics
         stats = long_df.groupby("target_idx")["context_wnir"].agg(
             ["mean", "std", "min", "max"]
         )
         stats = stats.rename(columns=context_cols)
-        stats[context_cols["std"]] = stats[context_cols["std"]].fillna(0)
+        stats[context_cols["std"]] = stats[context_cols["std"]].fillna(0.0)
 
+        # Join back to target
         results = df_target.join(stats)
 
-        target_val = results[wnir_col]
-        context_mean = results[context_cols["mean"]]
-        results[ratio_col] = np.divide(
-            target_val, context_mean, where=context_mean != 0, dtype=np.float32
+        # Compute ratio (safe division)
+        target_val = results[wnir_col].values
+        context_mean = results[context_cols["mean"]].values
+        ratio = np.divide(
+            target_val,
+            context_mean,
+            out=np.full_like(target_val, np.nan, dtype=np.float32),
+            where=context_mean != 0,
         )
+        results[ratio_col] = ratio
 
         return results[list(context_cols.values()) + [ratio_col]]
 
+    # Compute both directions
     new_cols_primary = _vectorized_calculate_stats(
         df_primary, df_secondary, tree_secondary
     )
-
     new_cols_secondary = _vectorized_calculate_stats(
         df_secondary, df_primary, tree_primary
     )

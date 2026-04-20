@@ -59,7 +59,6 @@ jobs:
       # 🔥 This step has been REMOVED.
       # The /nix/persistent/dvc-cache directory should be created and permissioned
       # on the self-hosted runner machine itself as a one-time setup task.
-
       - name: Run DVC Pipeline inside Docker
         run: |
           docker run --rm \
