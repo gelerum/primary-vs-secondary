@@ -56,12 +56,9 @@ jobs:
         run: |
           docker pull ghcr.io/${{ github.repository_owner }}/my-ml-image:latest
 
-      # 🔥 Fix permissions BEFORE container runs
-      - name: Prepare DVC cache (host)
-        run: |
-          sudo mkdir -p /nix/persistent/dvc-cache
-          sudo chown -R $(id -u):$(id -g) /nix/persistent/dvc-cache
-          sudo chmod -R u+rwX /nix/persistent/dvc-cache
+      # 🔥 This step has been REMOVED.
+      # The /nix/persistent/dvc-cache directory should be created and permissioned
+      # on the self-hosted runner machine itself as a one-time setup task.
 
       - name: Run DVC Pipeline inside Docker
         run: |
