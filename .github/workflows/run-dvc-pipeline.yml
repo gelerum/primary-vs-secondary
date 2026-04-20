@@ -1,0 +1,79 @@
+name: DVC Pipeline in Docker
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+      - 'dvc.yaml'
+      - 'dvc.lock'
+      - 'params.yaml'
+      - '.github/workflows/run-pipeline-build-image.yml'
+      - 'requirements.txt'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run_pipeline_and_commit:
+    name: Run DVC in Docker and Commit Changes
+    runs-on: self-hosted
+    permissions:
+      contents: write
+
+    container:
+      image: ${{ github.repository }}:${{ github.sha }}
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+        AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      volumes:
+        - /nix/persistent/dvc-cache:/dvc-cache
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure environment
+        run: |
+          set -e
+          # Tell Git to trust the workspace directory, as the user ID might differ
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          # Configure DVC to use the persistent cache mounted via `volumes`
+          echo "=== Configuring persistent DVC cache ==="
+          dvc cache dir /dvc-cache
+
+      - name: Run DVC pipeline
+        run: |
+          set -e
+          echo "=== Starting DVC pipeline ==="
+          dvc pull --force
+          dvc repro --force
+          dvc push
+          echo "=== DVC pipeline finished successfully ==="
+
+      - name: Commit and Push changes (dvc.lock + reports)
+        run: |
+          set -e
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # A simple pull-rebase is safer than complex auto-merging strategies
+          git pull --rebase
+
+          git add dvc.lock reports/
+
+          # Check if there are any staged changes before attempting to commit
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update dvc.lock and reports from CI [skip ci]"
+            # --force-with-lease is safer than a blind --force
+            git push --force-with-lease
+          fi
