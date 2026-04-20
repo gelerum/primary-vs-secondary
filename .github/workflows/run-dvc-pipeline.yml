@@ -38,7 +38,7 @@ jobs:
         run: |
           docker pull ghcr.io/${{ github.repository_owner }}/my-ml-image:${{ github.event.workflow_run.head_sha }}
 
-           - name: Run DVC Pipeline inside Docker
+      - name: Run DVC Pipeline inside Docker
         run: |
           docker run --rm \
             --user "$(id -u):$(id -g)" \
@@ -76,7 +76,6 @@ jobs:
 
               echo "=== DVC pipeline finished successfully ==="
             '
-
       - name: Commit and Push changes (dvc.lock + reports)
         run: |
           set -e
