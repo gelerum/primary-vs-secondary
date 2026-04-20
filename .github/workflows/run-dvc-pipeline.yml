@@ -38,7 +38,7 @@ jobs:
         run: |
           docker pull ghcr.io/${{ github.repository_owner }}/my-ml-image:${{ github.event.workflow_run.head_sha }}
 
-      - name: Run DVC Pipeline inside Docker
+           - name: Run DVC Pipeline inside Docker
         run: |
           docker run --rm \
             --user "$(id -u):$(id -g)" \
@@ -49,21 +49,24 @@ jobs:
             --env "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
             --env "AWS_REQUEST_CHECKSUM_CALCULATION=when_required" \
             --env "AWS_RESPONSE_CHECKSUM_VALIDATION=when_required" \
-            --env "HOME=/tmp/home" \
+            --env "HOME=/app/.home" \
             ghcr.io/${{ github.repository_owner }}/my-ml-image:${{ github.event.workflow_run.head_sha }} \
             bash -c '
               set -e
               echo "=== Configuring environment inside container ==="
 
-              git config --global --add safe.directory /app
+              # Create a proper writable HOME directory (recommended for NixOS)
+              mkdir -p /app/.home
+              chown -R "$(id -u):$(id -g)" /app/.home
+              chmod 700 /app/.home
 
-              mkdir -p /tmp/home
-              export HOME=/tmp/home
+              git config --global --add safe.directory /app
 
               git config --global user.name "github-actions[bot]"
               git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
               echo "=== DVC cache setup ==="
+              mkdir -p /dvc-cache
               dvc cache dir /dvc-cache
 
               echo "=== Starting DVC pipeline ==="
