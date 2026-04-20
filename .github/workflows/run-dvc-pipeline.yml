@@ -23,40 +23,41 @@ jobs:
     permissions:
       contents: write
 
-    container:
-      image: ${{ github.repository }}:${{ github.sha }}
-      env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        AWS_REQUEST_CHECKSUM_CALCULATION: when_required
-        AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
-      volumes:
-        - /nix/persistent/dvc-cache:/dvc-cache
-
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Configure environment
-        run: |
-          set -e
-          # Tell Git to trust the workspace directory, as the user ID might differ
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build Docker Image
+        run: docker build -t my-ml-image:latest .
 
-          # Configure DVC to use the persistent cache mounted via `volumes`
-          echo "=== Configuring persistent DVC cache ==="
-          dvc cache dir /dvc-cache
-
-      - name: Run DVC pipeline
+      - name: Run DVC Pipeline inside Docker
         run: |
-          set -e
-          echo "=== Starting DVC pipeline ==="
-          dvc pull --force
-          dvc repro --force
-          dvc push
-          echo "=== DVC pipeline finished successfully ==="
+          # This command is the heart of the solution. It manually replicates
+          # what `jobs.container` does, but in a way that works.
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --volume "${{ github.workspace }}:/app" \
+            --volume "/nix/persistent/dvc-cache:/dvc-cache" \
+            --workdir "/app" \
+            --env "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --env "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --env "AWS_REQUEST_CHECKSUM_CALCULATION=when_required" \
+            --env "AWS_RESPONSE_CHECKSUM_VALIDATION=when_required" \
+            my-ml-image:latest \
+            bash -c '
+              set -e
+              echo "=== Configuring environment inside container ==="
+              git config --global --add safe.directory /app
+              dvc cache dir /dvc-cache
+
+              echo "=== Starting DVC pipeline ==="
+              dvc pull --force
+              dvc repro --force
+              dvc push
+              echo "=== DVC pipeline finished successfully ==="
+            '
 
       - name: Commit and Push changes (dvc.lock + reports)
         run: |

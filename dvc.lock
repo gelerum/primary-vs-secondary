@@ -300,17 +300,27 @@ stages:
     deps:
     - path: data/interim/03_price_discounted.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 7cf4405a23faf5d8c788c8d06a20c5ab
+      size: 46394952
     - path: src/stages/04_wnir.py
       hash: md5
-      md5: 4d1054d1c156b485cac9401f9f77df29
-      size: 855
+      md5: 62f802b0905080a64d0b931033407368
+      size: 1402
     - path: src/wnir
       hash: md5
-      md5: b43a0aef702d650877dc2875cba926bc.dir
-      size: 4591
+      md5: f188d57dbb225fee889f069c0b6eb6b6.dir
+      size: 4379
       nfiles: 1
+    params:
+      params.yaml:
+        04_wnir:
+          h: 100
+          R:
+            min: 100
+            min-med: 500
+            med: 1000
+            max-med: 5000
+            max: 10000
     outs:
     - path: data/interim/04_wnir.parquet
       hash: md5
