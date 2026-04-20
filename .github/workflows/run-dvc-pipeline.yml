@@ -75,6 +75,7 @@ jobs:
 
               echo "=== DVC pipeline finished successfully ==="
             '      - name: Commit and Push changes (dvc.lock + reports)
+      - name: Commit and Push changes (dvc.lock + reports)
         run: |
           set -e
           git config --global user.name "github-actions[bot]"
