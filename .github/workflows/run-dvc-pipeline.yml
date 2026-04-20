@@ -54,7 +54,7 @@ jobs:
 
       - name: Pull Docker Image
         run: |
-          docker pull ghcr.io/${{ github.repository_owner }}/my-ml-image:${IMAGE_TAG}
+          docker pull ghcr.io/${{ github.repository_owner }}/my-ml-image:latest
 
       # 🔥 Fix permissions BEFORE container runs
       - name: Prepare DVC cache (host)
@@ -75,7 +75,7 @@ jobs:
             --env "AWS_REQUEST_CHECKSUM_CALCULATION=when_required" \
             --env "AWS_RESPONSE_CHECKSUM_VALIDATION=when_required" \
             --env "HOME=/app/.home" \
-            ghcr.io/${{ github.repository_owner }}/my-ml-image:${IMAGE_TAG} \
+            ghcr.io/${{ github.repository_owner }}/my-ml-image:latest \
             bash -c '
               set -e
 
