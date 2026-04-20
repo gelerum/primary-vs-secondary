@@ -8,7 +8,7 @@ on:
       - 'dvc.yaml'
       - 'dvc.lock'
       - 'params.yaml'
-      - '.github/workflows/run-pipeline-build-image.yml'
+      - '.github/workflows/run-dvc-pipeline.yml'
       - 'requirements.txt'
   workflow_dispatch:
 
