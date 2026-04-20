@@ -42,7 +42,7 @@ jobs:
 
       - name: Pull Docker Image
         run: |
-          docker pull ghcr.io/${{ github.repository_owner }}/my-ml-image:${{ github.event.workflow_run.head_sha }}
+          docker pull ghcr.io/${{ github.repository_owner }}/my-ml-image:latest
 
       - name: Run DVC Pipeline inside Docker
         run: |
@@ -56,7 +56,7 @@ jobs:
             --env "AWS_REQUEST_CHECKSUM_CALCULATION=when_required" \
             --env "AWS_RESPONSE_CHECKSUM_VALIDATION=when_required" \
             --env "HOME=/app/.home" \
-            ghcr.io/${{ github.repository_owner }}/my-ml-image:${{ github.event.workflow_run.head_sha }} \
+            ghcr.io/${{ github.repository_owner }}/my-ml-image:latest \
             bash -c '
               set -e
               echo "=== Configuring environment inside container ==="
