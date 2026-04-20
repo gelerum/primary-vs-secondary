@@ -30,7 +30,14 @@ jobs:
           fetch-depth: 0
 
       - name: Build Docker Image
-        run: docker build -t my-ml-image:latest .
+        run: |
+          # Clean cache before building (prevents most snapshot errors)
+          docker builder prune -a -f || true
+
+          docker build \
+            --no-cache \
+            --progress=plain \
+            -t my-ml-image:latest .
 
       - name: Run DVC Pipeline inside Docker
         run: |
