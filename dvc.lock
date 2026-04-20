@@ -25,13 +25,13 @@ stages:
       size: 336223981
     - path: src/clean
       hash: md5
-      md5: 7ef6e775e460f47d35b2d64683124119.dir
-      size: 10186
+      md5: 8dbf532a3fcf4093430159cca927ba00.dir
+      size: 10838
       nfiles: 7
     - path: src/stages/01_clean.py
       hash: md5
-      md5: cb3c50a5daca30c185100486df31513b
-      size: 1911
+      md5: 20e76f7274b00dca80d44b7a86c2bb63
+      size: 2764
     params:
       params.yaml:
         01_clean:
@@ -47,18 +47,23 @@ stages:
           build_year:
             min: 1685
             max:
+          address:
+            min_len: 12
+          common_moscow_point:
+            longitude: 37.617644
+            latitude: 55.755819
     outs:
     - path: data/interim/01_cleaned.parquet
       hash: md5
-      md5: e2eb0f350140185ebda0ad35946158a0
-      size: 49942022
+      md5: 44a039f0089e6b3391bf34402a61e3f8
+      size: 30739800
   02_geocode:
     cmd: python -m src.stages.02_geocode
     deps:
     - path: data/interim/01_cleaned.parquet
       hash: md5
-      md5: e2eb0f350140185ebda0ad35946158a0
-      size: 49942022
+      md5: 44a039f0089e6b3391bf34402a61e3f8
+      size: 30739800
     - path: src/geocode
       hash: md5
       md5: 4c8201ee9ed38be0b2f62acf76486756.dir
@@ -85,19 +90,19 @@ stages:
       size: 3453101
     - path: data/interim/02_geocoded.parquet
       hash: md5
-      md5: 12f1c199a63844ef28df1b726e0984d0
-      size: 39785014
+      md5: a674516a12552b624f2389a6fee60953
+      size: 29290365
   03_price_discount:
     cmd: python -m src.stages.03_price_discount
     deps:
     - path: data/interim/02_geocoded.parquet
       hash: md5
-      md5: 12f1c199a63844ef28df1b726e0984d0
-      size: 39785014
+      md5: a674516a12552b624f2389a6fee60953
+      size: 29290365
     - path: src/price_discount
       hash: md5
-      md5: 3adc23d7e9a7402cbf3469c13c2b991b.dir
-      size: 1082
+      md5: f6d3f802d53e608617695046f943125b.dir
+      size: 1399
       nfiles: 1
     - path: src/stages/03_price_discount.py
       hash: md5
@@ -106,8 +111,8 @@ stages:
     outs:
     - path: data/interim/03_price_discounted.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 7cf4405a23faf5d8c788c8d06a20c5ab
+      size: 46394952
   04_mean_knn:
     cmd: python -m src.stages.04_mean_knn
     deps:

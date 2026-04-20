@@ -105,11 +105,7 @@ DF5_ADAPTER = {
     "room_count": lambda df: pd.to_numeric(df["roomsOffered"], errors="coerce"),
     "floor": lambda df: pd.to_numeric(df["floorsOffered"], errors="coerce"),
     "floor_count": lambda df: pd.to_numeric(df["floorsTotal"], errors="coerce"),
-    "market_type": lambda df: (
-        df["flatType"]
-        .replace({"SECONDARY": "secondary", "NEW_SECONDARY": "secondary"})
-        .astype("string")
-    ),
+    "market_type": lambda df: "secondary",
     "housing_type": pd.NA,
     "flat_type": lambda df: "FLAT",
     "ceiling_height": lambda df: pd.to_numeric(df["ceilingHeight"], errors="coerce"),
@@ -122,11 +118,12 @@ DF5_ADAPTER = {
         pd.to_numeric(df["lastPrice"], errors="coerce")
         / pd.to_numeric(df["totalArea"], errors="coerce")
     ),
-    "date": lambda df: pd.to_datetime(
-        df["lastDate"].fillna(df["creationDate"]), errors="coerce"
-    ).dt.tz_localize(None).dt.normalize(),
+    "date": lambda df: (
+        pd.to_datetime(df["lastDate"].fillna(df["creationDate"]), errors="coerce")
+        .dt.tz_localize(None)
+        .dt.normalize()
+    ),
 }
-
 
 
 def _adapt_dataframe(df, adapter):

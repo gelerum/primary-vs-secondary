@@ -1,3 +1,4 @@
+from src.clean.constants import CANONICAL_COLUMNS, PRE_CLEAN_COLUMNS
 from src.clean.adapters import (
     DF1_ADAPTER,
     DF2_ADAPTER,
@@ -13,10 +14,12 @@ from src.clean.filters import (
     drop_nan_addresses,
     drop_nan_prices,
     drop_nan_rows,
+    filter_by_address_len,
     filter_by_area,
     filter_by_build_year,
     filter_by_floor,
     filter_by_price,
+    filter_common_moscow_geo_point,
     select_residential,
 )
 from src.clean.normalization import normalize_datasets
@@ -44,7 +47,7 @@ def main():
     df_no_nan_addresses = drop_nan_addresses(df_no_nan_rows)
     df_no_nan_prices = drop_nan_prices(df_no_nan_addresses)
 
-    df_type_casted = cast_types(df_no_nan_prices)
+    df_type_casted = cast_types(df_no_nan_prices, PRE_CLEAN_COLUMNS)
 
     df_filtered_by_area = filter_by_area(
         df_type_casted,
@@ -67,7 +70,27 @@ def main():
         params["build_year"]["max"],
     )
 
-    df_clean = df_filter_by_build_year
+    df_filter_by_address_len = filter_by_address_len(
+        df_filter_by_build_year,
+        params["address"]["min_len"],
+    )
+    df_filter_common_moscow_geo_point = filter_common_moscow_geo_point(
+        df_filter_by_address_len,
+        params["common_moscow_point"]["longitude"],
+        params["common_moscow_point"]["latitude"],
+    )
+
+    df_drop_nans_room_count_build_year = df_filter_common_moscow_geo_point.dropna(
+        subset=["room_count", "build_year"]
+    )
+
+    df_drop_columns_floor_count_ceiling_height = (
+        df_drop_nans_room_count_build_year.drop(
+            columns=["floor_count", "ceiling_height"]
+        )
+    )
+
+    df_clean = cast_types(df_drop_columns_floor_count_ceiling_height, CANONICAL_COLUMNS)
 
     df_clean.to_parquet("data/interim/01_cleaned.parquet", index=False)
 

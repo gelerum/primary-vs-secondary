@@ -1,8 +1,5 @@
-from src.clean.constants import CANONICAL_COLUMNS
-
-
-def cast_types(df):
-    for col, dtype in CANONICAL_COLUMNS.items():
+def cast_types(df, COLUMN_SCHEME):
+    for col, dtype in COLUMN_SCHEME.items():
         if col in df.columns:
             df[col] = df[col].astype(dtype)
 

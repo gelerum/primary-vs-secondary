@@ -11,6 +11,12 @@
   build_year:
     min: 1685
     max: null
+  address:
+    min_len: 12
+  common_moscow_point:
+    longitude: 37.617644
+    latitude: 55.755819
+
 02_geocode:
   geo:
     longitude:
@@ -19,7 +25,9 @@
     latitude:
       min: 55.15
       max: 56.05
+
 03_price_discount:
+
 04_wnir:
   h: 100
   R:

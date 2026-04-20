@@ -44,6 +44,8 @@ stages:
       - src/stages/04_wnir.py
       - data/interim/03_price_discounted.parquet
       - src/wnir
+    params:
+      - 04_wnir
     outs:
       - data/interim/04_wnir.parquet
 

@@ -17,6 +17,16 @@ def drop_nan_prices(df: DataFrame):
     )
 
 
+def filter_by_address_len(df, min_len):
+    df_filtered = df[df["address"].str.len() >= min_len]
+    return df_filtered
+
+
+def filter_common_moscow_geo_point(df, longitude, latitude):
+    df_filtered = df[~((df["longitude"] == longitude) & (df["latitude"] == latitude))]
+    return df_filtered
+
+
 def filter_by_area(df, area_min, area_max):
     df_filtered = df[(df["area"] >= area_min) & (df["area"] <= area_max)]
 
