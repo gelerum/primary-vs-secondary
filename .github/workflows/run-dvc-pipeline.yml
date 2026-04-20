@@ -87,13 +87,16 @@ jobs:
 
               echo "=== Starting DVC pipeline ==="
 
-              dvc pull --force --cache-dir /dvc-cache
+              # 🔥 FIX: Configure the cache directory using dvc config
+              dvc config --local cache.dir /dvc-cache
+
+              # 🔥 FIX: Remove the --cache-dir flags from pull and push
+              dvc pull --force
               dvc repro --force
-              dvc push --cache-dir /dvc-cache
+              dvc push
 
               echo "=== DVC pipeline finished successfully ==="
             '
-
       - name: Commit and Push changes (dvc.lock + reports)
         run: |
           set -e
