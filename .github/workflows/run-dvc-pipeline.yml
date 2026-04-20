@@ -8,6 +8,10 @@ on:
 
   workflow_dispatch:
 
+    push:
+      paths:
+        - '.github/workflows/run-dvc-pipeline.yml'
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
