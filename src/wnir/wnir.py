@@ -2,7 +2,112 @@ import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
 
-EARTH_RADIUS = 6371000.0  # meters
+EARTH_RADIUS = 6371000  # meters
+
+def get_all_types_of_wnir(
+        df: pd.DataFrame,
+        r: float,
+        h: float,
+        price_col: str = 'price_per_square_meter_normalized'
+) -> pd.DataFrame:
+
+    df_primary = df[df["market_type"] == "primary"].copy()
+    df_secondary = df[df["market_type"] == "secondary"].copy()
+
+    df_primary = compute_wnir(df_primary, r, h, price_col=price_col)
+    df_primary = compute_wnir(df_primary, r, h, df_secondary=df_secondary, price_col=price_col)
+    df_primary = compute_wnir_ratio(df_primary, r)
+
+    df_wnir = pd.concat([df_primary, df_secondary])
+
+    return df_wnir
+
+def compute_wnir(
+        df_primary: pd.DataFrame,
+        r: float,
+        h: float,
+        df_secondary: pd.DataFrame = None,
+        price_col: str = 'price_per_square_meter_normalized'
+) -> pd.DataFrame:
+
+    if df_secondary is None:
+        output_col = f'wnir_primary_{r}'
+        count_col = f'neighbours_count_primary_{r}'
+
+        coords_target = np.radians(df_primary[['latitude', 'longitude']].values)
+        values_target = df_primary[price_col].values
+
+        tree = BallTree(coords_target, metric='haversine')
+        indices = tree.query_radius(coords_target, r=r / EARTH_RADIUS, return_distance=False)
+
+        mode = 1
+    else:
+        output_col = f'wnir_secondary_{r}'
+        count_col = f'neighbours_count_secondary_{r}'
+
+        coords_target = np.radians(df_primary[['latitude', 'longitude']].values)
+        coords_source = np.radians(df_secondary[['latitude', 'longitude']].values)
+
+        values_source = df_secondary[price_col].values
+
+        tree = BallTree(coords_source, metric='haversine')
+        indices = tree.query_radius(coords_target, r=r/EARTH_RADIUS, return_distance=False)
+
+        mode = 0
+
+    n = len(df_primary)
+
+    wnir = np.full(n, np.nan)
+    neighbor_counts = np.zeros(n)
+
+    for i in range(n):
+        inds = indices[i]
+
+        if len(inds) == 0:
+            continue
+
+        center = coords_target[i]
+
+        if mode:
+            neighbors = coords_target[inds]
+            vals = values_target[inds]
+        else:
+            neighbors = coords_source[inds]
+            vals = values_source[inds]
+
+        dlat = neighbors[:, 0] - center[0]
+        dlon = neighbors[:, 1] - center[1]
+
+        a = np.sin(dlat / 2) ** 2 + np.cos(center[0]) * np.cos(neighbors[:, 0]) * np.sin(dlon / 2) ** 2
+        dists = 2 * EARTH_RADIUS * np.arcsin(np.sqrt(a))
+
+        if mode_self:
+            mask = dists > 0
+            if not mask.any():
+                continue
+            dists = dists[mask]
+            vals = vals[mask]
+
+        if len(dists) == 0:
+            continue
+
+        weights = np.exp(-dists / h)
+
+        wnir[i] = np.dot(weights, vals) / weights.sum()
+        neighbor_counts[i] = len(dists)
+
+    df_primary[output_col] = wnir
+    df_primary[count_col] = neighbor_counts
+
+    return df_primary
+
+def compute_wnir_ratio(
+        df_primary: pd.DataFrame,
+        r: int
+) -> pd.DataFrame:
+    df_primary[f'wnir_ratio_{r}'] = df_primary[f'wnir_primary_{r}']/df_primary[f'wnir_secondary_{r}']
+
+    return df_primary
 
 
 def compute_wnir_for_market(

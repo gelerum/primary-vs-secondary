@@ -31,8 +31,5 @@
 04_wnir:
   h: 100
   R:
-    min: 100
     min-med: 500
     med: 1000
-    max-med: 5000
-    max: 10000
