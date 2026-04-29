@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get install -y python3.14 python3.14-dev python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
+# Создаем символические ссылки, чтобы команда `python` указывала на python3.14
+RUN ln -s /usr/bin/python3.14 /usr/bin/python
 WORKDIR /app
 
 COPY requirements.txt .
@@ -53,6 +55,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
+# Создаем символические ссылки для python
+RUN ln -s /usr/bin/python3.14 /usr/bin/python
 WORKDIR /app
 
 # Копируем предустановленные Python пакеты из этапа сборки
