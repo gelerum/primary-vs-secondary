@@ -50,6 +50,7 @@ jobs:
       - name: Run DVC Pipeline inside Docker
         run: |
           docker run --rm \
+            --gpus all \
             --user "$(id -u):$(id -g)" \
             --volume "${{ github.workspace }}:/app" \
             --volume "/nix/persistent/dvc-cache:/dvc-cache" \
