@@ -11,8 +11,8 @@ def main():
     df_train = pd.read_parquet("data/interim/05_train.parquet")
 
     params = params_show()["06_ksearch"]
-    k_min = params["ksearch"]["k_min"]
-    k_max = params["ksearch"]["k_max"]
+    k_min = params["k_min"]
+    k_max = params["k_max"]
 
     sample_size = 10_000
     if len(df_train) > sample_size:
