@@ -26,7 +26,8 @@ COPY requirements.txt .
 # Предполагаем, что requirements-gpu.txt тоже существует
 COPY requirements-gpu.txt .
 
-RUN python -m pip install --upgrade pip
+RUN python3.14 -m ensurepip --upgrade && \
+    python3.14 -m pip install --upgrade pip setuptools wheel
 # Устанавливаем пакеты в отдельную директорию, чтобы скопировать их на финальный этап
 RUN python -m pip install --prefix=/install -r requirements.txt
 RUN python -m pip install --prefix=/install -r requirements-gpu.txt
