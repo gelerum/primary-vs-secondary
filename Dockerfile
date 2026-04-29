@@ -54,7 +54,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && add-apt-repository ppa:deadsnakes/ppa \
     && apt-get update \
     && apt-get install -y python3.14 libpython3.14-stdlib \
-    chromium \
     git \
     && rm -rf /var/lib/apt/lists/*
 
