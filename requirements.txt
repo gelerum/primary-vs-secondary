@@ -112,6 +112,7 @@ matplotlib-inline==0.2.1
 mdurl==0.1.2
 mistune==3.2.0
 multidict==6.7.1
+mypy_extensions==1.1.0
 narwhals==2.20.0
 nbclient==0.10.4
 nbconvert==7.17.1
@@ -125,6 +126,7 @@ omegaconf==2.3.0
 orjson==3.11.8
 packaging==26.1
 pandas==3.0.2
+pandera==0.31.1
 pandocfilters==1.5.1
 parso==0.8.6
 pathspec==1.0.4
@@ -189,7 +191,9 @@ tomlkit==0.14.0
 tornado==6.5.5
 tqdm==4.67.3
 traitlets==5.14.3
+typeguard==4.5.1
 typer==0.24.1
+typing-inspect==0.9.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 tzdata==2026.1
