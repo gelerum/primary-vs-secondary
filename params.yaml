@@ -27,7 +27,7 @@
       max: 56.0
 
 06_ksearch:
-  min_k: 1
+  min_k: 2
   max_k: 100
 
 # 03_price_discount:
