@@ -10,7 +10,6 @@ on:
       - 'params.yaml'
       - 'requirements.txt'
       - '.github/workflows/build-docker.yml'
-  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

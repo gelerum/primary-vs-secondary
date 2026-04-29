@@ -28,12 +28,12 @@
 
 06_ksearch:
   min_k: 2
-  max_k: 100
+  max_k: 200
 
 # 03_price_discount:
 
 # 04_wnir:
-#   h: 100
+#   h: 100а
 #   R:
 #     min: 100
 #     min-med: 500

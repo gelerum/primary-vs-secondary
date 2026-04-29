@@ -483,43 +483,43 @@ stages:
       size: 2735570
     - path: src/stages/05_kmeans_prep.py
       hash: md5
-      md5: 725eaf63578db1a1469b3e95dec202c5
-      size: 1799
+      md5: 2e76fa263cb5f5fa6a91f37f1a26df76
+      size: 2788
     outs:
     - path: data/interim/05_test.parquet
       hash: md5
-      md5: 9e33aecee77ccd6c9a7ecba3dbe3f10e
-      size: 1286420
+      md5: 65e55fc0a00da2b4257b024b010dc4d6
+      size: 15162476
     - path: data/interim/05_train.parquet
       hash: md5
-      md5: de9b6f7ab2e4fe1cca16dd04b52017b6
-      size: 7507944
+      md5: 0bfc15b308f114f5b01e345c6c25f35c
+      size: 112622578
     - path: data/interim/05_valid.parquet
       hash: md5
-      md5: acd892c66ecbd79ed49e9953499e260f
-      size: 1363096
+      md5: d50d5a07eb6ab2e19dbc911d2f52416c
+      size: 17203614
   06_ksearch:
     cmd: python -m src.stages.06_ksearch
     deps:
     - path: data/interim/05_train.parquet
       hash: md5
-      md5: de9b6f7ab2e4fe1cca16dd04b52017b6
-      size: 7507944
+      md5: 0bfc15b308f114f5b01e345c6c25f35c
+      size: 112622578
     - path: src/stages/06_ksearch.py
       hash: md5
-      md5: 430c1ba6bf9231a273210c2ee28953b4
-      size: 2157
+      md5: 99dd67fcaf81611028455f52c00ff1c1
+      size: 3778
     params:
       params.yaml:
         06_ksearch:
-          min_k: 1
-          max_k: 100
+          min_k: 2
+          max_k: 20
     outs:
     - path: report/06_ksearch_metrics.json
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 01b8acc938ef56d77570b3e5fc8b4187
+      size: 51
     - path: report/06_ksearch_plot.png
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: a841a3f64ee3668c0cbcd0c4c26e782b
+      size: 483470
