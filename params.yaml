@@ -24,15 +24,20 @@
       max: 38.05
     latitude:
       min: 55.15
-      max: 56.05
+      max: 56.0
 
-03_price_discount:
+06_ksearch:
+  min_k: 1
+  max_k: 100
 
-04_wnir:
-  h: 100
-  R:
-    min: 100
-    min-med: 500
-    med: 1000
-    max-med: 5000
-    max: 10000
+# 03_price_discount:
+
+# 04_wnir:
+#   h: 100
+#   R:
+#     min: 100
+#     min-med: 500
+#     med: 1000
+#     max-med: 5000
+#     max: 10000
+#   batch_size: 20000

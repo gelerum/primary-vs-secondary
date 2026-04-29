@@ -25,13 +25,13 @@ stages:
       size: 336223981
     - path: src/clean
       hash: md5
-      md5: 8dbf532a3fcf4093430159cca927ba00.dir
-      size: 10838
+      md5: 43b611a98eb7a619e8772ad942955987.dir
+      size: 11010
       nfiles: 7
     - path: src/stages/01_clean.py
       hash: md5
-      md5: 20e76f7274b00dca80d44b7a86c2bb63
-      size: 2764
+      md5: 23490555173e5dfc88880c7bcbaeba7b
+      size: 3306
     params:
       params.yaml:
         01_clean:
@@ -55,15 +55,15 @@ stages:
     outs:
     - path: data/interim/01_cleaned.parquet
       hash: md5
-      md5: 44a039f0089e6b3391bf34402a61e3f8
-      size: 30739800
+      md5: 16fb4af47913b5dce1443033eaea1370
+      size: 24357888
   02_geocode:
     cmd: python -m src.stages.02_geocode
     deps:
     - path: data/interim/01_cleaned.parquet
       hash: md5
-      md5: 44a039f0089e6b3391bf34402a61e3f8
-      size: 30739800
+      md5: 16fb4af47913b5dce1443033eaea1370
+      size: 24357888
     - path: src/geocode
       hash: md5
       md5: 4c8201ee9ed38be0b2f62acf76486756.dir
@@ -71,8 +71,8 @@ stages:
       nfiles: 3
     - path: src/stages/02_geocode.py
       hash: md5
-      md5: 4f579f7a9becb4ad67029ff51f04babe
-      size: 1196
+      md5: 1c676ea22616f9e0dadf6afcf50d110c
+      size: 1267
     params:
       params.yaml:
         02_geocode:
@@ -82,7 +82,7 @@ stages:
               max: 38.05
             latitude:
               min: 55.15
-              max: 56.05
+              max: 56.0
     outs:
     - path: data/cache/geocodes_checkpoint.parquet
       hash: md5
@@ -90,15 +90,15 @@ stages:
       size: 3453101
     - path: data/interim/02_geocoded.parquet
       hash: md5
-      md5: a674516a12552b624f2389a6fee60953
-      size: 29290365
+      md5: be196ea0a082755b2f6c8e4dc8f76427
+      size: 20136848
   03_price_discount:
     cmd: python -m src.stages.03_price_discount
     deps:
     - path: data/interim/02_geocoded.parquet
       hash: md5
-      md5: a674516a12552b624f2389a6fee60953
-      size: 29290365
+      md5: 458ba59583cf8a17e622313b617c81ac
+      size: 1805697
     - path: src/price_discount
       hash: md5
       md5: f6d3f802d53e608617695046f943125b.dir
@@ -106,13 +106,13 @@ stages:
       nfiles: 1
     - path: src/stages/03_price_discount.py
       hash: md5
-      md5: 1933d2ce01545ab3f97fed28e0544994
-      size: 304
+      md5: eea43f4a8291dd31b4c90ffee0423f27
+      size: 367
     outs:
     - path: data/interim/03_price_discounted.parquet
       hash: md5
-      md5: 7cf4405a23faf5d8c788c8d06a20c5ab
-      size: 46394952
+      md5: 387f2098030d52ef7ebb8b352c881fbb
+      size: 1935583
   04_mean_knn:
     cmd: python -m src.stages.04_mean_knn
     deps:
@@ -233,8 +233,8 @@ stages:
       size: 204
     - path: data/interim/04_wnir.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: dd14db82b4d179b7487a8f7ba2324792
+      size: 2336177
     - path: src/administrative_district
       hash: md5
       md5: 21ad6b08922e796904ee26a6c73d7d2e.dir
@@ -247,15 +247,15 @@ stages:
     outs:
     - path: data/interim/05_administrative_district.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 51abd30f3d56e7b20f796b327284165d
+      size: 2362080
   06_publish_processed:
     cmd: python -m src.stages.06_publish_processed
     deps:
     - path: data/interim/05_administrative_district.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 51abd30f3d56e7b20f796b327284165d
+      size: 2362080
     - path: src/stages/06_publish_processed.py
       hash: md5
       md5: 9d33f0a1f985970001768a2b11a29bd5
@@ -263,12 +263,12 @@ stages:
     outs:
     - path: data/processed/final.csv
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: fc157491ba1617f0a6412271a1507f66
+      size: 12858225
     - path: data/processed/final.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 51abd30f3d56e7b20f796b327284165d
+      size: 2362080
   06_report:
     cmd: python -m src.stages.06_report
     deps:
@@ -300,16 +300,16 @@ stages:
     deps:
     - path: data/interim/03_price_discounted.parquet
       hash: md5
-      md5: 7cf4405a23faf5d8c788c8d06a20c5ab
-      size: 46394952
+      md5: 387f2098030d52ef7ebb8b352c881fbb
+      size: 1935583
     - path: src/stages/04_wnir.py
       hash: md5
-      md5: 62f802b0905080a64d0b931033407368
-      size: 1402
+      md5: e969e81e703f3f344df4de70494f9462
+      size: 3968
     - path: src/wnir
       hash: md5
-      md5: f188d57dbb225fee889f069c0b6eb6b6.dir
-      size: 4379
+      md5: 280150ba944b9bd554d6569edf616efc.dir
+      size: 10024
       nfiles: 1
     params:
       params.yaml:
@@ -321,8 +321,205 @@ stages:
             med: 1000
             max-med: 5000
             max: 10000
+          batch_size: 20000
     outs:
     - path: data/interim/04_wnir.parquet
+      hash: md5
+      md5: dd14db82b4d179b7487a8f7ba2324792
+      size: 2336177
+  01_validate:
+    cmd: python -m src.stages.01_validate data/interim/01_cleaned.parquet
+    deps:
+    - path: data/interim/01_cleaned.parquet
+      hash: md5
+      md5: 16fb4af47913b5dce1443033eaea1370
+      size: 24357888
+    - path: src/stages/01_validate.py
+      hash: md5
+      md5: f2c87c6eec7e7a65246ce39f06e13678
+      size: 1411
+  02_validate:
+    cmd: python -m src.stages.02_validate data/interim/02_geocoded.parquet
+    deps:
+    - path: data/interim/02_geocoded.parquet
+      hash: md5
+      md5: be196ea0a082755b2f6c8e4dc8f76427
+      size: 20136848
+    - path: src/stages/02_validate.py
+      hash: md5
+      md5: a57b260919b2091ce70d9457782841fe
+      size: 1359
+  03_administrative_district:
+    cmd: python -m src.stages.03_administrative_district
+    deps:
+    - path: data/complimentary/ao.cpg
+      hash: md5
+      md5: ae3b3df9970b49b6523e608759bc957d
+      size: 5
+    - path: data/complimentary/ao.dbf
+      hash: md5
+      md5: 501442daab273f8b50b39bafa6ef4d7c
+      size: 1676
+    - path: data/complimentary/ao.prj
+      hash: md5
+      md5: e729936bf5360b37a15365fc295a1901
+      size: 143
+    - path: data/complimentary/ao.qml
+      hash: md5
+      md5: b7295d726799835d27b9c5f77088ea46
+      size: 9186
+    - path: data/complimentary/ao.qpj
+      hash: md5
+      md5: f34dee5ac9bad1bc567ccb2246dc228e
+      size: 257
+    - path: data/complimentary/ao.shp
+      hash: md5
+      md5: 20021c2492998205e05164178f094920
+      size: 351436
+    - path: data/complimentary/ao.shx
+      hash: md5
+      md5: 473e7d3573872631e74de71b0d6abb77
+      size: 204
+    - path: data/interim/02_geocoded.parquet
+      hash: md5
+      md5: be196ea0a082755b2f6c8e4dc8f76427
+      size: 20136848
+    - path: src/administrative_district
+      hash: md5
+      md5: 21ad6b08922e796904ee26a6c73d7d2e.dir
+      size: 677
+      nfiles: 1
+    - path: src/stages/03_administrative_district.py
+      hash: md5
+      md5: f9c4b39763a1f19fcbcca590d6aec626
+      size: 609
+    outs:
+    - path: data/interim/03_administrative_district.parquet
+      hash: md5
+      md5: 422e186ef496e591a4f3001d67f190c9
+      size: 20350682
+  03_validate:
+    cmd: python -m src.stages.03_validate 
+      data/interim/03_administrative_district.parquet
+    deps:
+    - path: data/interim/03_administrative_district.parquet
+      hash: md5
+      md5: 422e186ef496e591a4f3001d67f190c9
+      size: 20350682
+    - path: src/stages/03_validate.py
+      hash: md5
+      md5: 0b8e2a919f2fb71ccc9912f507b2cfdd
+      size: 1413
+  04_split:
+    cmd: python -m src.stages.04_split
+    deps:
+    - path: data/interim/03_administrative_district.parquet
+      hash: md5
+      md5: 422e186ef496e591a4f3001d67f190c9
+      size: 20350682
+    - path: src/stages/04_split.py
+      hash: md5
+      md5: 56bf285b046f4e05dcb85aedba5c4c4b
+      size: 550
+    outs:
+    - path: data/interim/04_test.parquet
+      hash: md5
+      md5: 5c88aec16632c5edad9841b020aa0d47
+      size: 2314298
+    - path: data/interim/04_train.parquet
+      hash: md5
+      md5: fc07e8b8f42dc274aa1fd7b5ded6a614
+      size: 16720589
+    - path: data/interim/04_valid.parquet
+      hash: md5
+      md5: 3a6902eea25628a8ece76ee45f71c37a
+      size: 2735570
+  05_scaling_onehot:
+    cmd: python -m src.stages.05_scaling_onehot
+    deps:
+    - path: data/interim/04_test.parquet
+      hash: md5
+      md5: 91fc9367ce53e550ca1bbb0509c85bfe
+      size: 2824982
+    - path: data/interim/04_train.parquet
+      hash: md5
+      md5: 7e14bbb70ae2561e3c5151f9d136451f
+      size: 18727093
+    - path: data/interim/04_valid.parquet
+      hash: md5
+      md5: 4c5e5897d5a9a2ff20ecd0c8a7939a79
+      size: 3237326
+    - path: src/stages/05_scaling_onehot.py
+      hash: md5
+      md5: 0034a4e847d0f5e0e904bd062be7e137
+      size: 1467
+    outs:
+    - path: data/interim/05_test.parquet
+      hash: md5
+      md5: 3252a8e40d3335701d7b784787b7e881
+      size: 3016250
+    - path: data/interim/05_train.parquet
+      hash: md5
+      md5: 173bedc38d6b12e6c44d5f07718e21aa
+      size: 22870406
+    - path: data/interim/05_valid.parquet
+      hash: md5
+      md5: 4cbd98465ee6dbc5c1d7a3bc9c26acbd
+      size: 3768780
+  05_kmeans_prep:
+    cmd: python -m src.stages.05_kmeans_prep
+    deps:
+    - path: data/interim/04_test.parquet
+      hash: md5
+      md5: 5c88aec16632c5edad9841b020aa0d47
+      size: 2314298
+    - path: data/interim/04_train.parquet
+      hash: md5
+      md5: fc07e8b8f42dc274aa1fd7b5ded6a614
+      size: 16720589
+    - path: data/interim/04_valid.parquet
+      hash: md5
+      md5: 3a6902eea25628a8ece76ee45f71c37a
+      size: 2735570
+    - path: src/stages/05_kmeans_prep.py
+      hash: md5
+      md5: 725eaf63578db1a1469b3e95dec202c5
+      size: 1799
+    outs:
+    - path: data/interim/05_test.parquet
+      hash: md5
+      md5: 9e33aecee77ccd6c9a7ecba3dbe3f10e
+      size: 1286420
+    - path: data/interim/05_train.parquet
+      hash: md5
+      md5: de9b6f7ab2e4fe1cca16dd04b52017b6
+      size: 7507944
+    - path: data/interim/05_valid.parquet
+      hash: md5
+      md5: acd892c66ecbd79ed49e9953499e260f
+      size: 1363096
+  06_ksearch:
+    cmd: python -m src.stages.06_ksearch
+    deps:
+    - path: data/interim/05_train.parquet
+      hash: md5
+      md5: de9b6f7ab2e4fe1cca16dd04b52017b6
+      size: 7507944
+    - path: src/stages/06_ksearch.py
+      hash: md5
+      md5: 430c1ba6bf9231a273210c2ee28953b4
+      size: 2157
+    params:
+      params.yaml:
+        06_ksearch:
+          min_k: 1
+          max_k: 100
+    outs:
+    - path: report/06_ksearch_metrics.json
+      hash: md5
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
+    - path: report/06_ksearch_plot.png
       hash: md5
       md5: d41d8cd98f00b204e9800998ecf8427e
       size: 0

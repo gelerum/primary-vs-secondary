@@ -1,172 +1,229 @@
+# src/wnir/wnir.py
+
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
+from tqdm import tqdm
+import gc
 
 EARTH_RADIUS = 6371000.0  # meters
 
 
-def compute_wnir_for_market(
-    df: pd.DataFrame,
+def _calculate_wnir_for_batch(
+    query_coords_rad: np.ndarray,
+    history_tree: BallTree,
+    history_values: np.ndarray,
     R: float,
     h: float,
-    price_col: str = "price_per_square_meter_normalized",
-    leaf_size: int = 40,
-) -> pd.DataFrame:
+) -> tuple[np.ndarray, np.ndarray]:
     """
-    Compute Weighted Nearest Item Ratio (WNIR) for a market (primary or secondary).
-    - Skips coordinate groups with >= 5000 identical locations.
-    - Rebuilds BallTree on filtered data to guarantee index alignment.
+    Вспомогательная функция для расчета WNIR для одного пакета (query)
+    на основе исторического дерева (history).
     """
-    df = df.copy()
-    output_col = f"wnir_{R}"
-    count_col = f"wnir_neighbours_count_{R}"
-
-    # Count duplicates per exact coordinate
-    coord_counts = df.groupby(["latitude", "longitude"])["latitude"].transform("count")
-    mask = coord_counts < 5000
-
-    if not mask.any():
-        df[output_col] = np.nan
-        df[count_col] = 0
-        return df
-
-    df_clear = df.loc[mask].copy()
-
-    # Build coordinates and tree ONLY on clear data
-    coords_rad = np.radians(
-        df_clear[["latitude", "longitude"]].values.astype(np.float32)
-    )
-    tree = BallTree(coords_rad, metric="haversine", leaf_size=leaf_size)
-
-    values = df_clear[price_col].values.astype(np.float32)
-
     radius_rad = R / EARTH_RADIUS
 
-    # Query all points at once (returns list of arrays)
-    indices_array, dists_array_rad = tree.query_radius(
-        coords_rad, r=radius_rad, return_distance=True, sort_results=True
+    # Находим соседей для точек из пакета в историческом дереве
+    indices_array, dists_array_rad = history_tree.query_radius(
+        query_coords_rad, r=radius_rad, return_distance=True, sort_results=True
     )
 
-    n = len(df_clear)
-    wnir = np.full(n, np.nan, dtype=np.float32)
-    neighbor_counts = np.zeros(n, dtype=np.int32)
+    n_query = len(query_coords_rad)
+    wnir = np.full(n_query, np.nan, dtype=np.float32)
+    neighbor_counts = np.zeros(n_query, dtype=np.int32)
 
     for i, (inds, dists_rad) in enumerate(zip(indices_array, dists_array_rad)):
-        if len(inds) <= 1:
+        # У нас нет "себя" в историческом дереве, поэтому не нужно отбрасывать inds[0]
+        if len(inds) == 0:
             continue
 
-        valid_inds = inds[1:]
-        dists_m = (dists_rad[1:] * EARTH_RADIUS).astype(np.float32)
-
-        if len(dists_m) == 0:
-            continue
-
-        neighbor_vals = values[valid_inds]
+        dists_m = (dists_rad * EARTH_RADIUS).astype(np.float32)
+        neighbor_vals = history_values[inds]
         neighbor_counts[i] = len(dists_m)
 
-        # Exponential kernel weights
         weights = np.exp(-dists_m / h)
         weight_sum = weights.sum()
 
         if weight_sum > 0:
             wnir[i] = np.dot(weights, neighbor_vals) / weight_sum
 
-    # Write results back
-    df[output_col] = np.nan
-    df[count_col] = -1
-    df.loc[mask, output_col] = wnir
-    df.loc[mask, count_col] = neighbor_counts
-
-    return df
+    return wnir, neighbor_counts
 
 
-def compute_ratio_wnir(
+def _calculate_context_stats_for_batch(
+    query_coords_rad: np.ndarray,
+    context_history_tree: BallTree,
+    context_history_values: np.ndarray,
+    R: float,
+) -> pd.DataFrame:
+    """
+    Расчет контекстных статистик (среднее, std и т.д.) для пакета точек
+    на основе исторического дерева контекстного рынка.
+    """
+    radius_rad = R / EARTH_RADIUS
+
+    indices_array = context_history_tree.query_radius(
+        query_coords_rad, r=radius_rad, return_distance=False
+    )
+
+    n_query = len(query_coords_rad)
+    means = np.full(n_query, np.nan, dtype=np.float32)
+    stds = np.full(n_query, np.nan, dtype=np.float32)
+    mins = np.full(n_query, np.nan, dtype=np.float32)
+    maxs = np.full(n_query, np.nan, dtype=np.float32)
+
+    for i, inds in enumerate(indices_array):
+        if len(inds) > 0:
+            neighbor_vals = context_history_values[inds]
+            means[i] = np.nanmean(neighbor_vals)
+            if len(inds) > 1:
+                stds[i] = np.nanstd(neighbor_vals)
+            else:
+                stds[i] = 0.0
+            mins[i] = np.nanmin(neighbor_vals)
+            maxs[i] = np.nanmax(neighbor_vals)
+
+    return pd.DataFrame(
+        {
+            f"wnir_context_mean_{R}": means,
+            f"wnir_context_std_{R}": stds,
+            f"wnir_context_min_{R}": mins,
+            f"wnir_context_max_{R}": maxs,
+        }
+    )
+
+
+def process_markets_in_batches(
     df_primary: pd.DataFrame,
     df_secondary: pd.DataFrame,
-    tree_primary: BallTree,
-    tree_secondary: BallTree,
     R: float,
+    h: float,
+    batch_size: int,
+    price_col: str = "price_per_square_meter_normalized",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Compute context statistics and ratio between primary and secondary markets.
+    Основная функция, реализующая пакетную обработку для расчета временного WNIR и его отношения.
+    Обрабатывает оба рынка синхронно по временным пакетам.
     """
+    # Подготовка колонок для результатов
     wnir_col = f"wnir_{R}"
+    count_col = f"wnir_neighbours_count_{R}"
+    ratio_col = f"wnir_ratio_mean_{R}"
 
-    def _vectorized_calculate_stats(
-        df_target: pd.DataFrame,
-        df_context: pd.DataFrame,
-        tree_context: BallTree,
-    ) -> pd.DataFrame:
-        ratio_col = f"wnir_ratio_mean_{R}"
-        context_cols = {
-            "mean": f"wnir_context_mean_{R}",
-            "std": f"wnir_context_std_{R}",
-            "min": f"wnir_context_min_{R}",
-            "max": f"wnir_context_max_{R}",
-        }
+    # Инициализация DataFrame для результатов с сохранением индекса
+    results_p = pd.DataFrame(index=df_primary.index)
+    results_s = pd.DataFrame(index=df_secondary.index)
 
-        coords_target = np.radians(
-            df_target[["latitude", "longitude"]].values.astype(np.float32)
-        )
-        values_context = df_context[wnir_col].astype(np.float32).values
+    # Инициализация пустых исторических данных
+    history_p = {
+        "coords_rad": np.empty((0, 2), dtype=np.float32),
+        "values": np.empty(0, dtype=np.float32),
+    }
+    history_s = {
+        "coords_rad": np.empty((0, 2), dtype=np.float32),
+        "values": np.empty(0, dtype=np.float32),
+    }
+    tree_p, tree_s = None, None
 
-        radius_rad = R / EARTH_RADIUS
+    # Определяем общие временные границы для итерации
+    min_date = min(df_primary["date"].min(), df_secondary["date"].min())
+    max_date = max(df_primary["date"].max(), df_secondary["date"].max())
 
-        indices_array = tree_context.query_radius(
-            coords_target, r=radius_rad, return_distance=False
-        )
+    # Создаем итератор по датам, чтобы брать синхронные пакеты
+    # Можно использовать pd.date_range для итерации по месяцам/неделям
+    # Но проще итерировать по индексам отсортированных данных
+    max_idx = max(len(df_primary), len(df_secondary))
 
-        if len(indices_array) == 0 or all(len(inds) == 0 for inds in indices_array):
-            empty = {col: np.nan for col in list(context_cols.values()) + [ratio_col]}
-            return pd.DataFrame(empty, index=df_target.index)
+    for i in tqdm(range(0, max_idx, batch_size), desc="Processing batches"):
+        # 1. Определяем текущий временной срез (пакет) для обоих рынков
+        batch_p = df_primary.iloc[i : i + batch_size]
+        batch_s = df_secondary.iloc[i : i + batch_size]
 
-        # Build long format for groupby
-        target_indices = np.repeat(
-            df_target.index.to_numpy(), [len(inds) for inds in indices_array]
-        )
-        context_indices = np.concatenate(indices_array)
+        # 2. Обработка пакета первичного рынка
+        if not batch_p.empty:
+            coords_rad_p = np.radians(
+                batch_p[["latitude", "longitude"]].values.astype(np.float32)
+            )
 
-        long_df = pd.DataFrame(
-            {
-                "target_idx": target_indices,
-                "context_original_idx": df_context.index[context_indices],
-            }
-        )
+            # WNIR на собственном рынке (нужна история первичного рынка)
+            if tree_p:
+                wnir, counts = _calculate_wnir_for_batch(
+                    coords_rad_p, tree_p, history_p["values"], R, h
+                )
+                results_p.loc[batch_p.index, wnir_col] = wnir
+                results_p.loc[batch_p.index, count_col] = counts
 
-        long_df = long_df.join(
-            pd.Series(values_context, index=df_context.index, name="context_wnir"),
-            on="context_original_idx",
-        )
+            # Статистики контекста (нужна история вторичного рынка)
+            if tree_s:
+                stats_df = _calculate_context_stats_for_batch(
+                    coords_rad_p, tree_s, history_s["values"], R
+                )
+                stats_df.index = batch_p.index
+                results_p = results_p.join(stats_df, how="outer")
 
-        # Aggregate statistics
-        stats = long_df.groupby("target_idx")["context_wnir"].agg(
-            ["mean", "std", "min", "max"]
-        )
-        stats = stats.rename(columns=context_cols)
-        stats[context_cols["std"]] = stats[context_cols["std"]].fillna(0.0)
+        # 3. Обработка пакета вторичного рынка
+        if not batch_s.empty:
+            coords_rad_s = np.radians(
+                batch_s[["latitude", "longitude"]].values.astype(np.float32)
+            )
 
-        # Join back to target
-        results = df_target.join(stats)
+            # WNIR на собственном рынке (нужна история вторичного рынка)
+            if tree_s:
+                wnir, counts = _calculate_wnir_for_batch(
+                    coords_rad_s, tree_s, history_s["values"], R, h
+                )
+                results_s.loc[batch_s.index, wnir_col] = wnir
+                results_s.loc[batch_s.index, count_col] = counts
 
-        # Compute ratio (safe division)
-        target_val = results[wnir_col].values
-        context_mean = results[context_cols["mean"]].values
-        ratio = np.divide(
-            target_val,
-            context_mean,
-            out=np.full_like(target_val, np.nan, dtype=np.float32),
-            where=context_mean != 0,
-        )
-        results[ratio_col] = ratio
+            # Статистики контекста (нужна история первичного рынка)
+            if tree_p:
+                stats_df = _calculate_context_stats_for_batch(
+                    coords_rad_s, tree_p, history_p["values"], R
+                )
+                stats_df.index = batch_s.index
+                results_s = results_s.join(stats_df, how="outer")
 
-        return results[list(context_cols.values()) + [ratio_col]]
+        # 4. Обновление истории: добавляем обработанные пакеты в историю
+        if not batch_p.empty:
+            coords_rad_p = np.radians(
+                batch_p[["latitude", "longitude"]].values.astype(np.float32)
+            )
+            values_p = batch_p[price_col].values.astype(np.float32)
+            history_p["coords_rad"] = np.vstack([history_p["coords_rad"], coords_rad_p])
+            history_p["values"] = np.concatenate([history_p["values"], values_p])
+            tree_p = BallTree(history_p["coords_rad"], metric="haversine")
 
-    # Compute both directions
-    new_cols_primary = _vectorized_calculate_stats(
-        df_primary, df_secondary, tree_secondary
-    )
-    new_cols_secondary = _vectorized_calculate_stats(
-        df_secondary, df_primary, tree_primary
-    )
+        if not batch_s.empty:
+            coords_rad_s = np.radians(
+                batch_s[["latitude", "longitude"]].values.astype(np.float32)
+            )
+            values_s = batch_s[price_col].values.astype(np.float32)
+            history_s["coords_rad"] = np.vstack([history_s["coords_rad"], coords_rad_s])
+            history_s["values"] = np.concatenate([history_s["values"], values_s])
+            tree_s = BallTree(history_s["coords_rad"], metric="haversine")
 
-    return new_cols_primary, new_cols_secondary
+        gc.collect()  # Очищаем память после каждой итерации
+
+    # 5. Вычисляем итоговое отношение WNIR
+    # Это делается в конце, когда все WNIR и контекстные средние посчитаны
+    for df_res, market in [(results_p, "primary"), (results_s, "secondary")]:
+        if not df_res.empty:
+            target_val = df_res[wnir_col].values
+            context_mean = df_res[f"wnir_context_mean_{R}"].values
+
+            # Безопасное деление
+            ratio = np.divide(
+                target_val,
+                context_mean,
+                out=np.full_like(target_val, np.nan, dtype=np.float32),
+                where=(context_mean != 0) & ~np.isnan(context_mean),
+            )
+            df_res[ratio_col] = ratio
+
+    # Заполняем пропуски в служебных колонках, чтобы типы данных были корректны
+    for col in [count_col, f"wnir_context_std_{R}"]:
+        if col in results_p.columns:
+            results_p[col] = results_p[col].fillna(0)
+        if col in results_s.columns:
+            results_s[col] = results_s[col].fillna(0)
+
+    return results_p, results_s

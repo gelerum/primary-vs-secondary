@@ -1,4 +1,4 @@
-from src.clean.constants import CANONICAL_COLUMNS, PRE_CLEAN_COLUMNS
+from src.clean.constants import INTERIM_CLEAN_COLUMNS
 from src.clean.adapters import (
     DF1_ADAPTER,
     DF2_ADAPTER,
@@ -21,6 +21,7 @@ from src.clean.filters import (
     filter_by_price,
     filter_common_moscow_geo_point,
     select_residential,
+    filter_after_2017,
 )
 from src.clean.normalization import normalize_datasets
 from src.clean.type_casting import cast_types
@@ -47,7 +48,7 @@ def main():
     df_no_nan_addresses = drop_nan_addresses(df_no_nan_rows)
     df_no_nan_prices = drop_nan_prices(df_no_nan_addresses)
 
-    df_type_casted = cast_types(df_no_nan_prices, PRE_CLEAN_COLUMNS)
+    df_type_casted = cast_types(df_no_nan_prices, INTERIM_CLEAN_COLUMNS)
 
     df_filtered_by_area = filter_by_area(
         df_type_casted,
@@ -90,9 +91,26 @@ def main():
         )
     )
 
-    df_clean = cast_types(df_drop_columns_floor_count_ceiling_height, CANONICAL_COLUMNS)
+    df_fileter_after_2017 = filter_after_2017(
+        df_drop_columns_floor_count_ceiling_height, "date"
+    )
 
-    df_clean.to_parquet("data/interim/01_cleaned.parquet", index=False)
+    df_fileter_after_2017["year"] = df_fileter_after_2017["date"].dt.year.astype(
+        "uint16"
+    )
+    df_fileter_after_2017["month"] = df_fileter_after_2017["date"].dt.month.astype(
+        "uint8"
+    )
+    df_fileter_after_2017["day"] = df_fileter_after_2017["date"].dt.day.astype("uint8")
+
+    df_no_flat_type = df_fileter_after_2017.drop(columns=["flat_type"])
+
+    df_clean = df_no_flat_type
+    # df_clean = cast_types(df_fileter_after_2017, CANONICAL_COLUMNS)
+
+    df_clean.to_parquet(
+        "data/interim/01_cleaned.parquet", index=False, engine="pyarrow"
+    )
 
 
 if __name__ == "__main__":

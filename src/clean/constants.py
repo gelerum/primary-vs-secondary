@@ -1,4 +1,4 @@
-PRE_CLEAN_COLUMNS = {
+INTERIM_CLEAN_COLUMNS = {
     "address": "string",
     "latitude": "float32",
     "longitude": "float32",
@@ -16,6 +16,7 @@ PRE_CLEAN_COLUMNS = {
     "date": "datetime64[ns]",
     "market_type": "category",
 }
+
 CANONICAL_COLUMNS = {
     "address": "string",
     "latitude": "float32",

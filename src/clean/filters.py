@@ -1,4 +1,5 @@
 from pandas import DataFrame
+import pandas as pd
 
 
 def drop_nan_rows(df):
@@ -20,6 +21,11 @@ def drop_nan_prices(df: DataFrame):
 def filter_by_address_len(df, min_len):
     df_filtered = df[df["address"].str.len() >= min_len]
     return df_filtered
+
+
+def filter_after_2017(df, date_col):
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    return df[df[date_col] > "2017-12-31"]
 
 
 def filter_common_moscow_geo_point(df, longitude, latitude):

@@ -27,6 +27,8 @@ def main():
         params["geo"]["latitude"]["max"],
     )
 
+    df_filtered_by_geo = df_filtered_by_geo.drop(columns=["address"])
+
     df_filtered_by_geo.to_parquet("data/interim/02_geocoded.parquet", index=False)
 
 

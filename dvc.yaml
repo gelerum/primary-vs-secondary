@@ -14,6 +14,12 @@ stages:
       - 01_clean
     outs:
       - data/interim/01_cleaned.parquet
+  
+  01_validate:
+    cmd: python -m src.stages.01_validate data/interim/01_cleaned.parquet
+    deps:
+      - src/stages/01_validate.py
+      - data/interim/01_cleaned.parquet
 
   02_geocode:
     cmd: python -m src.stages.02_geocode
@@ -29,31 +35,17 @@ stages:
       - data/cache/geocodes_checkpoint.parquet:
           persist: true
 
-  03_price_discount:
-    cmd: python -m src.stages.03_price_discount
+  02_validate:
+    cmd: python -m src.stages.02_validate data/interim/02_geocoded.parquet
     deps:
-      - src/stages/03_price_discount.py
+      - src/stages/02_validate.py
       - data/interim/02_geocoded.parquet
-      - src/price_discount
-    outs:
-      - data/interim/03_price_discounted.parquet
 
-  04_wnir:
-    cmd: python -m src.stages.04_wnir
+  03_administrative_district:
+    cmd: python -m src.stages.03_administrative_district
     deps:
-      - src/stages/04_wnir.py
-      - data/interim/03_price_discounted.parquet
-      - src/wnir
-    params:
-      - 04_wnir
-    outs:
-      - data/interim/04_wnir.parquet
-
-  05_administrative_district:
-    cmd: python -m src.stages.05_administrative_district
-    deps:
-      - src/stages/05_administrative_district.py
-      - data/interim/04_wnir.parquet
+      - src/stages/03_administrative_district.py
+      - data/interim/02_geocoded.parquet
       - src/administrative_district
       - data/complimentary/ao.cpg
       - data/complimentary/ao.dbf
@@ -63,24 +55,84 @@ stages:
       - data/complimentary/ao.shp
       - data/complimentary/ao.shx
     outs:
-      - data/interim/05_administrative_district.parquet
-
-
-  06_publish_processed:
-    cmd: python -m src.stages.06_publish_processed
+      - data/interim/03_administrative_district.parquet
+    
+  03_validate:
+    cmd: python -m src.stages.03_validate data/interim/03_administrative_district.parquet
     deps:
-      - data/interim/05_administrative_district.parquet
-      - src/stages/06_publish_processed.py
+      - src/stages/03_validate.py
+      - data/interim/03_administrative_district.parquet
+  
+  04_split:
+    cmd: python -m src.stages.04_split
+    deps:
+      - src/stages/04_split.py
+      - data/interim/03_administrative_district.parquet
     outs:
-      - data/processed/final.parquet
-      - data/processed/final.csv
-
-  06_report:
-    cmd: python -m src.stages.06_report
+      - data/interim/04_train.parquet
+      - data/interim/04_valid.parquet
+      - data/interim/04_test.parquet
+  
+  05_kmeans_prep:
+    cmd: python -m src.stages.05_kmeans_prep
     deps:
-      - src/stages/06_report.py
-      - src/report
-      - data/interim/05_administrative_district.parquet
-      
+      - src/stages/05_kmeans_prep.py
+      - data/interim/04_train.parquet
+      - data/interim/04_valid.parquet
+      - data/interim/04_test.parquet
+    outs:
+      - data/interim/05_train.parquet
+      - data/interim/05_valid.parquet
+      - data/interim/05_test.parquet
+  06_ksearch:
+    cmd: python -m src.stages.06_ksearch
+    deps:
+      - src/stages/06_ksearch.py
+      - data/interim/05_train.parquet
     params:
-      - 02_geocode
+      - 06_ksearch
+    outs:
+      - report/06_ksearch_metrics.json
+      - report/06_ksearch_plot.png
+
+  # 03_price_discount:
+  #   cmd: python -m src.stages.03_price_discount
+  #   deps:
+  #     - src/stages/03_price_discount.py
+  #     - data/interim/02_geocoded.parquet
+  #     - src/price_discount
+  #   outs:
+  #     - data/interim/03_price_discounted.parquet
+
+  # 04_wnir:
+  #   cmd: python -m src.stages.04_wnir
+  #   deps:
+  #     - src/stages/04_wnir.py
+  #     - data/interim/03_price_discounted.parquet
+  #     - src/wnir
+  #   params:
+  #     - 04_wnir
+  #   outs:
+  #     - data/interim/04_wnir.parquet
+
+ 
+
+
+  # 06_publish_processed:
+  #   cmd: python -m src.stages.06_publish_processed
+  #   deps:
+  #     - data/interim/05_administrative_district.parquet
+  #     - src/stages/06_publish_processed.py
+  #   outs:
+  #     - data/processed/final.parquet
+  #     - data/processed/final.csv
+
+  # 06_report:
+  #   cmd: python -m src.stages.06_report
+  #   deps:
+  #     - src/stages/06_report.py
+  #     - src/report
+  #     - data/interim/05_administrative_district.parquet
+      
+  #   params:
+  #     - 02_geocode
