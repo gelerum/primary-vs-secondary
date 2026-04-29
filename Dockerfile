@@ -57,10 +57,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Создаем символические ссылки для python
-RUN ln -s /usr/bin/python3.14 /usr/bin/python && \
-    ln -s /usr/bin/python3.14 /usr/bin/python3
-
 WORKDIR /app
 
 # Копируем предустановленные Python пакеты из этапа сборки
