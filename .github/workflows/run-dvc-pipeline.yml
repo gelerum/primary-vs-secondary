@@ -1,9 +1,5 @@
 name: Run DVC Pipeline
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   run_pipeline_and_commit:
     name: Run DVC in Docker and Commit Changes
