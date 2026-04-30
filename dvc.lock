@@ -794,8 +794,8 @@ stages:
       size: 2740530
     - path: src/stages/wnir.py
       hash: md5
-      md5: fc7b1070596f52b425ea45ad82750643
-      size: 2184
+      md5: d363cc90f2fc0e34379acdaecb447bd6
+      size: 2155
     params:
       params.yaml:
         wnir:
@@ -810,13 +810,13 @@ stages:
     outs:
     - path: data/interim/wnir_test.parquet
       hash: md5
-      md5: 0e5fd2152af32374e71b1f5f7ef2a874
-      size: 38307
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
     - path: data/interim/wnir_train.parquet
       hash: md5
-      md5: bba248d4f51cf0f939cbcb5cdac9ae36
-      size: 153780
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
     - path: data/interim/wnir_valid.parquet
       hash: md5
-      md5: d8da05a9d3643f5eda07814c786eb2d2
-      size: 48164
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
