@@ -528,33 +528,33 @@ stages:
     deps:
     - path: data/interim/split_test.parquet
       hash: md5
-      md5: f6351134877f7f9d3e52d2fc620f21b9
-      size: 2216538
+      md5: 5c88aec16632c5edad9841b020aa0d47
+      size: 2314298
     - path: data/interim/split_train.parquet
       hash: md5
-      md5: 896d4c4386eeb713b74782dea404c5ca
-      size: 15996852
+      md5: fc07e8b8f42dc274aa1fd7b5ded6a614
+      size: 16720589
     - path: data/interim/split_valid.parquet
       hash: md5
-      md5: 7518c5cd2092c0df32567e895299924f
-      size: 2670794
+      md5: 3a6902eea25628a8ece76ee45f71c37a
+      size: 2735570
     - path: src/stages/price_discount.py
       hash: md5
-      md5: f17b42dfbb65e46131fc6f1343795609
-      size: 3571
+      md5: 1ea571c91fab0348ee55024dab823847
+      size: 3575
     outs:
     - path: data/interim/price_discount_test.parquet
       hash: md5
-      md5: f2e9ccc262dc308872a31db29ee479dd
-      size: 2319668
+      md5: 1d5ae280879ceb8652906ce6e3a508d5
+      size: 2319877
     - path: data/interim/price_discount_train.parquet
       hash: md5
-      md5: 7c96c517e4cb2ba3582f47327f025bca
-      size: 18323750
+      md5: 294add20561f4ab79715125088ab3de8
+      size: 18326447
     - path: data/interim/price_discount_valid.parquet
       hash: md5
-      md5: f1efaebab66fbccdebc7ed2588a064b8
-      size: 2740449
+      md5: 25406a0e816336c4343a2f507f5d3f45
+      size: 2740530
   clean:
     cmd: python -m src.stages.clean
     deps:
@@ -585,8 +585,8 @@ stages:
       nfiles: 7
     - path: src/stages/clean.py
       hash: md5
-      md5: 470f667118fbb3184036538a10da6f3b
-      size: 3308
+      md5: 528f3d0aaed91cdae792a983bc6576aa
+      size: 3284
     params:
       params.yaml:
         clean:
@@ -610,15 +610,15 @@ stages:
     outs:
     - path: data/interim/clean.parquet
       hash: md5
-      md5: 8f11f81ab3ba4580da0b06ec609a17a3
-      size: 23361417
+      md5: 16fb4af47913b5dce1443033eaea1370
+      size: 24357888
   geocode:
     cmd: python -m src.stages.geocode
     deps:
     - path: data/interim/clean.parquet
       hash: md5
-      md5: 8f11f81ab3ba4580da0b06ec609a17a3
-      size: 23361417
+      md5: 16fb4af47913b5dce1443033eaea1370
+      size: 24357888
     - path: src/geocode
       hash: md5
       md5: 4c8201ee9ed38be0b2f62acf76486756.dir
@@ -645,8 +645,8 @@ stages:
       size: 3453101
     - path: data/interim/geocode.parquet
       hash: md5
-      md5: 77a713a85606b42152ed84784b5065f3
-      size: 19195517
+      md5: be196ea0a082755b2f6c8e4dc8f76427
+      size: 20136848
   administrative_district:
     cmd: python -m src.stages.administrative_district
     deps:
@@ -680,8 +680,8 @@ stages:
       size: 204
     - path: data/interim/geocode.parquet
       hash: md5
-      md5: 77a713a85606b42152ed84784b5065f3
-      size: 19195517
+      md5: be196ea0a082755b2f6c8e4dc8f76427
+      size: 20136848
     - path: src/administrative_district
       hash: md5
       md5: 21ad6b08922e796904ee26a6c73d7d2e.dir
@@ -694,15 +694,15 @@ stages:
     outs:
     - path: data/interim/administrative_district.parquet
       hash: md5
-      md5: 3da3fc7e6d7c3b3569b20f0817fc8e5c
-      size: 19409349
+      md5: 422e186ef496e591a4f3001d67f190c9
+      size: 20350682
   split:
     cmd: python -m src.stages.split
     deps:
     - path: data/interim/administrative_district.parquet
       hash: md5
-      md5: 3da3fc7e6d7c3b3569b20f0817fc8e5c
-      size: 19409349
+      md5: 422e186ef496e591a4f3001d67f190c9
+      size: 20350682
     - path: src/stages/split.py
       hash: md5
       md5: 786f86bc3a7c291fe3749fd9306ae75d
@@ -710,16 +710,16 @@ stages:
     outs:
     - path: data/interim/split_test.parquet
       hash: md5
-      md5: f6351134877f7f9d3e52d2fc620f21b9
-      size: 2216538
+      md5: 5c88aec16632c5edad9841b020aa0d47
+      size: 2314298
     - path: data/interim/split_train.parquet
       hash: md5
-      md5: 896d4c4386eeb713b74782dea404c5ca
-      size: 15996852
+      md5: fc07e8b8f42dc274aa1fd7b5ded6a614
+      size: 16720589
     - path: data/interim/split_valid.parquet
       hash: md5
-      md5: 7518c5cd2092c0df32567e895299924f
-      size: 2670794
+      md5: 3a6902eea25628a8ece76ee45f71c37a
+      size: 2735570
   scale_ohe:
     cmd: python -m src.stages.scale_ohe
     deps:
@@ -752,3 +752,71 @@ stages:
       hash: md5
       md5: 48fb73d910159373d37cefdf8424621c
       size: 3680479
+  ksearch:
+    cmd: python -m src.stages.ksearch
+    deps:
+    - path: data/interim/price_discount_train.parquet
+      hash: md5
+      md5: 294add20561f4ab79715125088ab3de8
+      size: 18326447
+    - path: src/stages/ksearch.py
+      hash: md5
+      md5: 3822cb7b076adae09d5468f37277f370
+      size: 3117
+    params:
+      params.yaml:
+        ksearch:
+          min_k: 2
+          max_k: 20
+    outs:
+    - path: report/ksearch_metrics.json
+      hash: md5
+      md5: 881980ecf0061397e8c9b96f1d7aaeb0
+      size: 52
+    - path: report/ksearch_plot.png
+      hash: md5
+      md5: bc4342bd4814c873848f52c39ce0def6
+      size: 96966
+  wnir:
+    cmd: python -m src.stages.wnir
+    deps:
+    - path: data/interim/price_discount_test.parquet
+      hash: md5
+      md5: 1d5ae280879ceb8652906ce6e3a508d5
+      size: 2319877
+    - path: data/interim/price_discount_train.parquet
+      hash: md5
+      md5: 294add20561f4ab79715125088ab3de8
+      size: 18326447
+    - path: data/interim/price_discount_valid.parquet
+      hash: md5
+      md5: 25406a0e816336c4343a2f507f5d3f45
+      size: 2740530
+    - path: src/stages/wnir.py
+      hash: md5
+      md5: 10f8aaa1dd96873777763c0438932f31
+      size: 3255
+    params:
+      params.yaml:
+        wnir:
+          h: 100
+          R:
+            min: 100
+            min-med: 500
+            med: 1000
+            max-med: 5000
+            max: 10000
+          batch_size: 20000
+    outs:
+    - path: data/interim/wnir_test.parquet
+      hash: md5
+      md5: 61b018438e387cdc0ee6237c71c09690
+      size: 478444
+    - path: data/interim/wnir_train.parquet
+      hash: md5
+      md5: ae4dbbc2b7cd663886de7a98f9c2047e
+      size: 1947191
+    - path: data/interim/wnir_valid.parquet
+      hash: md5
+      md5: 83e956bba89776e31f5b2500d6993d7d
+      size: 483741

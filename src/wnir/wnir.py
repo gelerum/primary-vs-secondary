@@ -93,27 +93,22 @@ def _calculate_context_stats_for_batch(
 
 
 def process_markets_in_batches(
-    df_primary: pd.DataFrame,
-    df_secondary: pd.DataFrame,
+    df: pd.DataFrame,  # Передаем ОБЩИЙ отсортированный по дате датасет
     R: float,
     h: float,
     batch_size: int,
     price_col: str = "price_per_square_meter_normalized",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Основная функция, реализующая пакетную обработку для расчета временного WNIR и его отношения.
-    Обрабатывает оба рынка синхронно по временным пакетам.
-    """
-    # Подготовка колонок для результатов
+
     wnir_col = f"wnir_{R}"
     count_col = f"wnir_neighbours_count_{R}"
     ratio_col = f"wnir_ratio_mean_{R}"
 
-    # Инициализация DataFrame для результатов с сохранением индекса
-    results_p = pd.DataFrame(index=df_primary.index)
-    results_s = pd.DataFrame(index=df_secondary.index)
+    # Создаем маски для разделения результатов
+    is_primary = df["market_type"] == "primary"
+    results_p = pd.DataFrame(index=df[is_primary].index)
+    results_s = pd.DataFrame(index=df[~is_primary].index)
 
-    # Инициализация пустых исторических данных
     history_p = {
         "coords_rad": np.empty((0, 2), dtype=np.float32),
         "values": np.empty(0, dtype=np.float32),
@@ -124,27 +119,23 @@ def process_markets_in_batches(
     }
     tree_p, tree_s = None, None
 
-    # Определяем общие временные границы для итерации
-    min_date = min(df_primary["date"].min(), df_secondary["date"].min())
-    max_date = max(df_primary["date"].max(), df_secondary["date"].max())
+    # Идем по ОБЩЕМУ таймлайну
+    for i in tqdm(range(0, len(df), batch_size), desc="Processing batches"):
+        # 1. Берем общий батч (строго один временной отрезок)
+        batch = df.iloc[i : i + batch_size]
 
-    # Создаем итератор по датам, чтобы брать синхронные пакеты
-    # Можно использовать pd.date_range для итерации по месяцам/неделям
-    # Но проще итерировать по индексам отсортированных данных
-    max_idx = max(len(df_primary), len(df_secondary))
+        # 2. Разделяем батч на рынки
+        batch_p = batch[batch["market_type"] == "primary"]
+        batch_s = batch[batch["market_type"] == "secondary"]
 
-    for i in tqdm(range(0, max_idx, batch_size), desc="Processing batches"):
-        # 1. Определяем текущий временной срез (пакет) для обоих рынков
-        batch_p = df_primary.iloc[i : i + batch_size]
-        batch_s = df_secondary.iloc[i : i + batch_size]
-
+        # 3. Обработка первички (используем ТЕКУЩИЕ деревья)
         # 2. Обработка пакета первичного рынка
         if not batch_p.empty:
             coords_rad_p = np.radians(
                 batch_p[["latitude", "longitude"]].values.astype(np.float32)
             )
 
-            # WNIR на собственном рынке (нужна история первичного рынка)
+            # Собственный рынок (WNIR)
             if tree_p:
                 wnir, counts = _calculate_wnir_for_batch(
                     coords_rad_p, tree_p, history_p["values"], R, h
@@ -152,13 +143,13 @@ def process_markets_in_batches(
                 results_p.loc[batch_p.index, wnir_col] = wnir
                 results_p.loc[batch_p.index, count_col] = counts
 
-            # Статистики контекста (нужна история вторичного рынка)
+            # Контекстный рынок (Статистики)
             if tree_s:
                 stats_df = _calculate_context_stats_for_batch(
                     coords_rad_p, tree_s, history_s["values"], R
                 )
-                stats_df.index = batch_p.index
-                results_p = results_p.join(stats_df, how="outer")
+                # ИСПРАВЛЕНИЕ: Вместо join используем loc для записи данных батча в общую таблицу
+                results_p.loc[batch_p.index, stats_df.columns] = stats_df.values
 
         # 3. Обработка пакета вторичного рынка
         if not batch_s.empty:
@@ -166,7 +157,7 @@ def process_markets_in_batches(
                 batch_s[["latitude", "longitude"]].values.astype(np.float32)
             )
 
-            # WNIR на собственном рынке (нужна история вторичного рынка)
+            # Собственный рынок (WNIR)
             if tree_s:
                 wnir, counts = _calculate_wnir_for_batch(
                     coords_rad_s, tree_s, history_s["values"], R, h
@@ -174,35 +165,28 @@ def process_markets_in_batches(
                 results_s.loc[batch_s.index, wnir_col] = wnir
                 results_s.loc[batch_s.index, count_col] = counts
 
-            # Статистики контекста (нужна история первичного рынка)
+            # Контекстный рынок (Статистики)
             if tree_p:
                 stats_df = _calculate_context_stats_for_batch(
                     coords_rad_s, tree_p, history_p["values"], R
                 )
-                stats_df.index = batch_s.index
-                results_s = results_s.join(stats_df, how="outer")
+                # ИСПРАВЛЕНИЕ: То же самое для вторичного рынка
+                results_s.loc[batch_s.index, stats_df.columns] = stats_df.values
 
-        # 4. Обновление истории: добавляем обработанные пакеты в историю
+        # 5. ТОЛЬКО ТЕПЕРЬ обновляем историю (чтобы батч не предсказывал сам себя)
         if not batch_p.empty:
-            coords_rad_p = np.radians(
-                batch_p[["latitude", "longitude"]].values.astype(np.float32)
-            )
             values_p = batch_p[price_col].values.astype(np.float32)
             history_p["coords_rad"] = np.vstack([history_p["coords_rad"], coords_rad_p])
             history_p["values"] = np.concatenate([history_p["values"], values_p])
             tree_p = BallTree(history_p["coords_rad"], metric="haversine")
 
         if not batch_s.empty:
-            coords_rad_s = np.radians(
-                batch_s[["latitude", "longitude"]].values.astype(np.float32)
-            )
             values_s = batch_s[price_col].values.astype(np.float32)
             history_s["coords_rad"] = np.vstack([history_s["coords_rad"], coords_rad_s])
             history_s["values"] = np.concatenate([history_s["values"], values_s])
             tree_s = BallTree(history_s["coords_rad"], metric="haversine")
 
-        gc.collect()  # Очищаем память после каждой итерации
-
+        gc.collect()
     # 5. Вычисляем итоговое отношение WNIR
     # Это делается в конце, когда все WNIR и контекстные средние посчитаны
     for df_res, market in [(results_p, "primary"), (results_s, "secondary")]:

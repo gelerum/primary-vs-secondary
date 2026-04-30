@@ -28,16 +28,14 @@ geocode:
 
 ksearch:
   min_k: 2
-  max_k: 200
+  max_k: 20
 
-# 03_price_discount:
-
-# 04_wnir:
-#   h: 100а
-#   R:
-#     min: 100
-#     min-med: 500
-#     med: 1000
-#     max-med: 5000
-#     max: 10000
-#   batch_size: 20000
+wnir:
+  h: 100
+  R:
+    min: 100
+    min-med: 500
+    med: 1000
+    max-med: 5000
+    max: 10000
+  batch_size: 20000

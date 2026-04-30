@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 def main():
     df_train = pd.read_parquet("data/interim/price_discount_train.parquet")
 
-    date_cols = ["year", "month", "day"]
+    date_cols = ["date", "year", "month", "day"]
     price_cols = ["price_per_square_meter_normalized", "price_normalized"]
     num_cols = [
         c
@@ -79,19 +79,19 @@ def main():
     res_df = pd.DataFrame(results)
     fig, axs = plt.subplots(1, 2, figsize=(20, 15))
 
-    axs[0, 0].plot(res_df["k"], res_df["inertia"], marker="o", color="green")
-    axs[0, 0].set_title("Elbow Method")
-    axs[0, 0].set_ylabel("Inertia")
-    axs[0, 0].grid(True, alpha=0.3)
+    axs[0].plot(res_df["k"], res_df["inertia"], marker="o", color="green")
+    axs[0].set_title("Elbow Method")
+    axs[0].set_ylabel("Inertia")
+    axs[0].grid(True, alpha=0.3)
 
-    axs[0, 1].plot(res_df["k"], res_df["silhouette"], marker="o", color="blue")
-    axs[0, 1].axvline(
+    axs[1].plot(res_df["k"], res_df["silhouette"], marker="o", color="blue")
+    axs[1].axvline(
         x=best_k_sil, color="red", linestyle="--", label=f"Best k={best_k_sil}"
     )
-    axs[0, 1].set_title("Silhouette Score")
-    axs[0, 1].set_ylabel("Score")
-    axs[0, 1].legend()
-    axs[0, 1].grid(True, alpha=0.3)
+    axs[1].set_title("Silhouette Score")
+    axs[1].set_ylabel("Score")
+    axs[1].legend()
+    axs[1].grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig("report/ksearch_plot.png")

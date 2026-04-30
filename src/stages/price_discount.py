@@ -10,7 +10,7 @@ class PriceDiscounter(BaseEstimator, TransformerMixin):
     def fit(self, df, y=None):
 
         df_ = df.copy()
-        df_["date"] = pd.to_datetime(df_[["year", "month", "day"]])
+        # df_["date"] = pd.to_datetime(df_[["year", "month", "day"]])
         df_["period"] = df_["date"].dt.to_period("M").dt.to_timestamp()
 
         monthly = (
@@ -43,7 +43,7 @@ class PriceDiscounter(BaseEstimator, TransformerMixin):
             )
 
         df_ = df.copy()
-        df_["date"] = pd.to_datetime(df_[["year", "month", "day"]])
+        # df_["date"] = pd.to_datetime(df_[["year", "month", "day"]])
         df_["period"] = df_["date"].dt.to_period("M").dt.to_timestamp()
 
         # Присоединяем карту, полученную на train-данных

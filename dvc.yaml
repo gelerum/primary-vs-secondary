@@ -77,3 +77,18 @@ stages:
     outs:
       - report/ksearch_metrics.json
       - report/ksearch_plot.png
+
+  wnir:
+    cmd: python -m src.stages.wnir
+    deps:
+      - data/interim/price_discount_train.parquet
+      - data/interim/price_discount_valid.parquet
+      - data/interim/price_discount_test.parquet
+      - src/stages/wnir.py
+    params:
+      - wnir
+    outs:
+      - data/interim/wnir_train.parquet
+      - data/interim/wnir_valid.parquet
+      - data/interim/wnir_test.parquet
+
