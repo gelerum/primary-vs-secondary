@@ -1,14 +1,12 @@
 name: Run DVC Pipeline
 
+on:
+  workflow_dispatch:
+  
 jobs:
   run_pipeline_and_commit:
     name: Run DVC in Docker and Commit Changes
     runs-on: self-hosted
-
-    # Run always except when workflow_run failed
-    if: |
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.conclusion == 'success'
 
     permissions:
       contents: write
