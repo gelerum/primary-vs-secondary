@@ -4,18 +4,35 @@ import matplotlib.pyplot as plt
 from dvc.api import params_show
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import silhouette_score
-from sklearn.decomposition import PCA
-from umap import UMAP
 from tqdm import tqdm
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
 
 def main():
-    df_train = pd.read_parquet("data/interim/05_train.parquet")
+    df_train = pd.read_parquet("data/interim/price_discount_train.parquet")
 
-    # Предполагаем, что признаки уже отмасштабированы (StandardScaler)
-    # Если нет - PCA и UMAP выдадут шум.
+    date_cols = ["year", "month", "day"]
+    price_cols = ["price_per_square_meter_normalized", "price_normalized"]
+    num_cols = [
+        c
+        for c in df_train.select_dtypes(include="number").columns
+        if c not in date_cols and c not in price_cols
+    ]
+    cat_cols = [
+        c
+        for c in df_train.select_dtypes(include="category").columns
+        if c not in ["market_type"]
+    ]
 
-    params = params_show()["06_ksearch"]
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", StandardScaler(), num_cols),
+            ("cat", OneHotEncoder(), cat_cols),
+        ]
+    )
+
+    params = params_show()["ksearch"]
     k_min = params["min_k"]
     k_max = params["max_k"]
 
@@ -25,6 +42,9 @@ def main():
         X_sample = df_train.sample(sample_size, random_state=42)
     else:
         X_sample = df_train
+
+    df_train = preprocessor.fit_transform(df_train)
+    X_sample = preprocessor.transform(X_sample)
 
     results = []
     best_k_sil = k_min
@@ -54,32 +74,16 @@ def main():
         if score > max_silhouette:
             max_silhouette = score
             best_k_sil = k
-            # Сохраняем лучшую модель для визуализации
             best_model = model
 
-    # --- Подготовка данных для PCA и UMAP ---
-    print(f"Generating PCA and UMAP for best k={best_k_sil}...")
-    labels_sample = best_model.predict(X_sample)
-
-    # PCA
-    pca = PCA(n_components=2, random_state=42)
-    X_pca = pca.fit_transform(X_sample)
-
-    # UMAP (может занять 30-60 секунд на 10к точках)
-    umap_model = UMAP(n_neighbors=15, min_dist=0.1, random_state=42)
-    X_umap = umap_model.fit_transform(X_sample)
-
-    # --- ВИЗУАЛИЗАЦИЯ (сетка 2x2) ---
     res_df = pd.DataFrame(results)
-    fig, axs = plt.subplots(2, 2, figsize=(20, 15))
+    fig, axs = plt.subplots(1, 2, figsize=(20, 15))
 
-    # 1. Локоть
     axs[0, 0].plot(res_df["k"], res_df["inertia"], marker="o", color="green")
     axs[0, 0].set_title("Elbow Method")
     axs[0, 0].set_ylabel("Inertia")
     axs[0, 0].grid(True, alpha=0.3)
 
-    # 2. Силуэт
     axs[0, 1].plot(res_df["k"], res_df["silhouette"], marker="o", color="blue")
     axs[0, 1].axvline(
         x=best_k_sil, color="red", linestyle="--", label=f"Best k={best_k_sil}"
@@ -89,25 +93,10 @@ def main():
     axs[0, 1].legend()
     axs[0, 1].grid(True, alpha=0.3)
 
-    # 3. PCA Scatter
-    scatter1 = axs[1, 0].scatter(
-        X_pca[:, 0], X_pca[:, 1], c=labels_sample, cmap="viridis", s=5, alpha=0.6
-    )
-    axs[1, 0].set_title(f"PCA Projection (k={best_k_sil})")
-    plt.colorbar(scatter1, ax=axs[1, 0])
-
-    # 4. UMAP Scatter
-    scatter2 = axs[1, 1].scatter(
-        X_umap[:, 0], X_umap[:, 1], c=labels_sample, cmap="viridis", s=5, alpha=0.6
-    )
-    axs[1, 1].set_title(f"UMAP Projection (k={best_k_sil})")
-    plt.colorbar(scatter2, ax=axs[1, 1])
-
     plt.tight_layout()
-    plt.savefig("report/06_ksearch_plot.png")
+    plt.savefig("report/ksearch_plot.png")
 
-    # Сохраняем метрики
-    with open("report/06_ksearch_metrics.json", "w") as f:
+    with open("report/ksearch_metrics.json", "w") as f:
         json.dump(
             {"best_k": int(best_k_sil), "max_silhouette": float(max_silhouette)}, f
         )

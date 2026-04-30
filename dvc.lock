@@ -523,3 +523,232 @@ stages:
       hash: md5
       md5: a841a3f64ee3668c0cbcd0c4c26e782b
       size: 483470
+  price_discount:
+    cmd: python -m src.stages.price_discount
+    deps:
+    - path: data/interim/split_test.parquet
+      hash: md5
+      md5: f6351134877f7f9d3e52d2fc620f21b9
+      size: 2216538
+    - path: data/interim/split_train.parquet
+      hash: md5
+      md5: 896d4c4386eeb713b74782dea404c5ca
+      size: 15996852
+    - path: data/interim/split_valid.parquet
+      hash: md5
+      md5: 7518c5cd2092c0df32567e895299924f
+      size: 2670794
+    - path: src/stages/price_discount.py
+      hash: md5
+      md5: f17b42dfbb65e46131fc6f1343795609
+      size: 3571
+    outs:
+    - path: data/interim/price_discount_test.parquet
+      hash: md5
+      md5: f2e9ccc262dc308872a31db29ee479dd
+      size: 2319668
+    - path: data/interim/price_discount_train.parquet
+      hash: md5
+      md5: 7c96c517e4cb2ba3582f47327f025bca
+      size: 18323750
+    - path: data/interim/price_discount_valid.parquet
+      hash: md5
+      md5: f1efaebab66fbccdebc7ed2588a064b8
+      size: 2740449
+  clean:
+    cmd: python -m src.stages.clean
+    deps:
+    - path: data/raw/Dataset_SCO_KVM_MONS_GRC_IZD_DMA_MTK_20250805.csv
+      hash: md5
+      md5: e07d0dd497440a1589970c0b1ffd532f
+      size: 10321279
+    - path: data/raw/Etagi_secondary_classified_dataset_20250805.csv
+      hash: md5
+      md5: 89fbe1215809c3d0c3d510132273044e
+      size: 111092939
+    - path: data/raw/Etagi_secondary_dataset_20250805.csv
+      hash: md5
+      md5: 09695d1cb9e94f3c562a485e0bf532a9
+      size: 26001664
+    - path: data/raw/msk_houses_deals_ds.csv
+      hash: md5
+      md5: 52d212d0a59bfcc506e9e861c7936c36
+      size: 402792115
+    - path: data/raw/msk_united_geo_market_deals.parquet
+      hash: md5
+      md5: 2e0c03633c794dbf0c2749209454c0a5
+      size: 336223981
+    - path: src/clean
+      hash: md5
+      md5: 43b611a98eb7a619e8772ad942955987.dir
+      size: 11010
+      nfiles: 7
+    - path: src/stages/clean.py
+      hash: md5
+      md5: 470f667118fbb3184036538a10da6f3b
+      size: 3308
+    params:
+      params.yaml:
+        clean:
+          area:
+            min: 17.5
+            max: 1100
+          floor:
+            min: -4
+            max: 85
+          price:
+            min: 1100000
+            max: 7300000000
+          build_year:
+            min: 1685
+            max:
+          address:
+            min_len: 12
+          common_moscow_point:
+            longitude: 37.617644
+            latitude: 55.755819
+    outs:
+    - path: data/interim/clean.parquet
+      hash: md5
+      md5: 8f11f81ab3ba4580da0b06ec609a17a3
+      size: 23361417
+  geocode:
+    cmd: python -m src.stages.geocode
+    deps:
+    - path: data/interim/clean.parquet
+      hash: md5
+      md5: 8f11f81ab3ba4580da0b06ec609a17a3
+      size: 23361417
+    - path: src/geocode
+      hash: md5
+      md5: 4c8201ee9ed38be0b2f62acf76486756.dir
+      size: 5964
+      nfiles: 3
+    - path: src/stages/geocode.py
+      hash: md5
+      md5: 7ec7e577ea3696aaa91844f207ed1ad3
+      size: 1255
+    params:
+      params.yaml:
+        geocode:
+          geo:
+            longitude:
+              min: 36.9
+              max: 38.05
+            latitude:
+              min: 55.15
+              max: 56.0
+    outs:
+    - path: data/cache/geocodes_checkpoint.parquet
+      hash: md5
+      md5: 8220fb88e84327ce0852e845bd3413f8
+      size: 3453101
+    - path: data/interim/geocode.parquet
+      hash: md5
+      md5: 77a713a85606b42152ed84784b5065f3
+      size: 19195517
+  administrative_district:
+    cmd: python -m src.stages.administrative_district
+    deps:
+    - path: data/complimentary/ao.cpg
+      hash: md5
+      md5: ae3b3df9970b49b6523e608759bc957d
+      size: 5
+    - path: data/complimentary/ao.dbf
+      hash: md5
+      md5: 501442daab273f8b50b39bafa6ef4d7c
+      size: 1676
+    - path: data/complimentary/ao.prj
+      hash: md5
+      md5: e729936bf5360b37a15365fc295a1901
+      size: 143
+    - path: data/complimentary/ao.qml
+      hash: md5
+      md5: b7295d726799835d27b9c5f77088ea46
+      size: 9186
+    - path: data/complimentary/ao.qpj
+      hash: md5
+      md5: f34dee5ac9bad1bc567ccb2246dc228e
+      size: 257
+    - path: data/complimentary/ao.shp
+      hash: md5
+      md5: 20021c2492998205e05164178f094920
+      size: 351436
+    - path: data/complimentary/ao.shx
+      hash: md5
+      md5: 473e7d3573872631e74de71b0d6abb77
+      size: 204
+    - path: data/interim/geocode.parquet
+      hash: md5
+      md5: 77a713a85606b42152ed84784b5065f3
+      size: 19195517
+    - path: src/administrative_district
+      hash: md5
+      md5: 21ad6b08922e796904ee26a6c73d7d2e.dir
+      size: 677
+      nfiles: 1
+    - path: src/stages/administrative_district.py
+      hash: md5
+      md5: 1fe3bb2f314883db9b2266c1da7d3e47
+      size: 602
+    outs:
+    - path: data/interim/administrative_district.parquet
+      hash: md5
+      md5: 3da3fc7e6d7c3b3569b20f0817fc8e5c
+      size: 19409349
+  split:
+    cmd: python -m src.stages.split
+    deps:
+    - path: data/interim/administrative_district.parquet
+      hash: md5
+      md5: 3da3fc7e6d7c3b3569b20f0817fc8e5c
+      size: 19409349
+    - path: src/stages/split.py
+      hash: md5
+      md5: 786f86bc3a7c291fe3749fd9306ae75d
+      size: 584
+    outs:
+    - path: data/interim/split_test.parquet
+      hash: md5
+      md5: f6351134877f7f9d3e52d2fc620f21b9
+      size: 2216538
+    - path: data/interim/split_train.parquet
+      hash: md5
+      md5: 896d4c4386eeb713b74782dea404c5ca
+      size: 15996852
+    - path: data/interim/split_valid.parquet
+      hash: md5
+      md5: 7518c5cd2092c0df32567e895299924f
+      size: 2670794
+  scale_ohe:
+    cmd: python -m src.stages.scale_ohe
+    deps:
+    - path: data/interim/price_discount_test.parquet
+      hash: md5
+      md5: f2e9ccc262dc308872a31db29ee479dd
+      size: 2319668
+    - path: data/interim/price_discount_train.parquet
+      hash: md5
+      md5: 7c96c517e4cb2ba3582f47327f025bca
+      size: 18323750
+    - path: data/interim/price_discount_valid.parquet
+      hash: md5
+      md5: f1efaebab66fbccdebc7ed2588a064b8
+      size: 2740449
+    - path: src/stages/scale_ohe.py
+      hash: md5
+      md5: bce6aaef72bd8e0ab45763e9764ea0ba
+      size: 1719
+    outs:
+    - path: data/interim/scale_ohe_test.parquet
+      hash: md5
+      md5: 8afb220ac90d5c50a2af2d16e795265b
+      size: 2903852
+    - path: data/interim/scale_ohe_train.parquet
+      hash: md5
+      md5: 8465124346c8b6b5239a3a9f7d738493
+      size: 25574912
+    - path: data/interim/scale_ohe_valid.parquet
+      hash: md5
+      md5: 48fb73d910159373d37cefdf8424621c
+      size: 3680479

@@ -1,70 +1,37 @@
-# Этап сборки (builder)
-# Используем образ devel, так как он содержит компиляторы (nvcc) и заголовочные файлы,
-# которые могут понадобиться для установки некоторых Python пакетов.
-# Выберите версию CUDA, которая вам нужна. Например, 12.1.1
-FROM nvidia/cuda:12.1.1-devel-ubuntu22.04 AS builder
+FROM python:3.14-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Устанавливаем Python 3.14, так как в базовом образе NVIDIA его нет
-# Используем PPA deadsnakes для свежих версий Python
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common \
-    build-essential \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y python3.14 python3.14-dev python3-pip \
-    && rm -rf /var/lib/apt/lists/*
-
-# Создаем символические ссылки, чтобы команда `python` указывала на python3.14
-RUN ln -sf /usr/bin/python3.14 /usr/bin/python
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
-# Предполагаем, что requirements-gpu.txt тоже существует
-COPY requirements-gpu.txt .
 
-RUN python3.14 -m ensurepip --upgrade && \
-    python3.14 -m pip install --upgrade pip setuptools wheel
-# Устанавливаем пакеты в отдельную директорию, чтобы скопировать их на финальный этап
-RUN python -m pip install --prefix=/install -r requirements.txt
-RUN python -m pip install --prefix=/install -r requirements-gpu.txt
+RUN python -m pip install --upgrade pip && \
+    python -m pip install --prefix=/install -r requirements.txt
 
 
-# Финальный этап (final stage)
-# Используем образ runtime, он меньше по размеру, так как не содержит инструментов для разработки
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+# Final stage
+FROM python:3.14-slim
 
-# Устанавливаем переменные окружения
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    # Переменные для корректной работы с GPU внутри контейнера
-    NVIDIA_VISIBLE_DEVICES=all \
-    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Устанавливаем Python 3.14 и другие необходимые утилиты
-ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /app
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update \
-    && apt-get install -y python3.14 libpython3.14-stdlib \
+    chromium \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Создаем символические ссылки для python
-RUN ln -sf /usr/bin/python3.14 /usr/bin/python
-WORKDIR /app
-
-# Копируем предустановленные Python пакеты из этапа сборки
 COPY --from=builder /install /usr/local
 
-# Копируем код приложения
 COPY . .
 
-# Пример команды для запуска
 # CMD ["dvc", "repro", "--pull"]

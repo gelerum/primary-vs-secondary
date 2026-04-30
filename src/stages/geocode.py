@@ -6,9 +6,9 @@ from dvc.api import params_show
 
 
 def main():
-    params = params_show()["02_geocode"]
+    params = params_show()["geocode"]
 
-    df_clean = pd.read_parquet("data/interim/01_cleaned.parquet")
+    df_clean = pd.read_parquet("data/interim/clean.parquet")
 
     # Захардкодил очкистку от нулевых координат, чтобы не вызывать геокодинг. Не помню, почему его не хочу запускать. Мб из-за того что нужно преедавать api адреса на сервер
     df_clean = df_clean.dropna(subset=["latitude", "longitude"])
@@ -29,7 +29,7 @@ def main():
 
     df_filtered_by_geo = df_filtered_by_geo.drop(columns=["address"])
 
-    df_filtered_by_geo.to_parquet("data/interim/02_geocoded.parquet", index=False)
+    df_filtered_by_geo.to_parquet("data/interim/geocode.parquet", index=False)
 
 
 if __name__ == "__main__":

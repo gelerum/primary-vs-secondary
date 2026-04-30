@@ -29,7 +29,7 @@ from dvc.api import params_show
 
 
 def main():
-    params = params_show()["01_clean"]
+    params = params_show()["clean"]
 
     dfs = read_dfs()
 
@@ -103,14 +103,12 @@ def main():
     )
     df_fileter_after_2017["day"] = df_fileter_after_2017["date"].dt.day.astype("uint8")
 
-    df_no_flat_type = df_fileter_after_2017.drop(columns=["flat_type"])
+    df_no_flat_type_no_date = df_fileter_after_2017.drop(columns=["flat_type", "date"])
 
-    df_clean = df_no_flat_type
+    df_clean = df_no_flat_type_no_date
     # df_clean = cast_types(df_fileter_after_2017, CANONICAL_COLUMNS)
 
-    df_clean.to_parquet(
-        "data/interim/01_cleaned.parquet", index=False, engine="pyarrow"
-    )
+    df_clean.to_parquet("data/interim/clean.parquet", index=False, engine="pyarrow")
 
 
 if __name__ == "__main__":
