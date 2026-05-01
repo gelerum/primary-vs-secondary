@@ -1,4 +1,4 @@
-01_clean:
+clean:
   area: 
     min: 17.5
     max: 1100
@@ -17,18 +17,20 @@
     longitude: 37.617644
     latitude: 55.755819
 
-02_geocode:
+geocode:
   geo:
     longitude:
       min: 36.90
       max: 38.05
     latitude:
       min: 55.15
-      max: 56.05
+      max: 56.0
 
-03_price_discount:
+ksearch:
+  min_k: 2
+  max_k: 20
 
-04_wnir:
+wnir:
   h: 100
   R:
     min: 100
@@ -36,3 +38,4 @@
     med: 1000
     max-med: 5000
     max: 10000
+  batch_size: 20000

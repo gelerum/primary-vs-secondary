@@ -1,6 +1,7 @@
 name: Build Docker Image
 
 on:
+  workflow_dispatch:
   push:
     paths:
       - 'src/**'
@@ -10,11 +11,6 @@ on:
       - 'params.yaml'
       - 'requirements.txt'
       - '.github/workflows/build-docker.yml'
-  workflow_dispatch:
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:

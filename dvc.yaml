@@ -1,9 +1,9 @@
 stages:
 
-  01_clean:
-    cmd: python -m src.stages.01_clean
+  clean:
+    cmd: python -m src.stages.clean
     deps:
-      - src/stages/01_clean.py
+      - src/stages/clean.py
       - src/clean
       - data/raw/Dataset_SCO_KVM_MONS_GRC_IZD_DMA_MTK_20250805.csv
       - data/raw/Etagi_secondary_classified_dataset_20250805.csv
@@ -11,49 +11,29 @@ stages:
       - data/raw/msk_houses_deals_ds.csv
       - data/raw/msk_united_geo_market_deals.parquet
     params:
-      - 01_clean
+      - clean
     outs:
-      - data/interim/01_cleaned.parquet
+      - data/interim/clean.parquet
 
-  02_geocode:
-    cmd: python -m src.stages.02_geocode
+  geocode:
+    cmd: python -m src.stages.geocode
     deps:
-      - data/interim/01_cleaned.parquet
+      - data/interim/clean.parquet
       # - secrets/geocoding/ya_api_keys.csv
-      - src/stages/02_geocode.py
+      - src/stages/geocode.py
       - src/geocode
     params:
-      - 02_geocode
+      - geocode
     outs:
-      - data/interim/02_geocoded.parquet
+      - data/interim/geocode.parquet
       - data/cache/geocodes_checkpoint.parquet:
           persist: true
 
-  03_price_discount:
-    cmd: python -m src.stages.03_price_discount
+  administrative_district:
+    cmd: python -m src.stages.administrative_district
     deps:
-      - src/stages/03_price_discount.py
-      - data/interim/02_geocoded.parquet
-      - src/price_discount
-    outs:
-      - data/interim/03_price_discounted.parquet
-
-  04_wnir:
-    cmd: python -m src.stages.04_wnir
-    deps:
-      - src/stages/04_wnir.py
-      - data/interim/03_price_discounted.parquet
-      - src/wnir
-    params:
-      - 04_wnir
-    outs:
-      - data/interim/04_wnir.parquet
-
-  05_administrative_district:
-    cmd: python -m src.stages.05_administrative_district
-    deps:
-      - src/stages/05_administrative_district.py
-      - data/interim/04_wnir.parquet
+      - src/stages/administrative_district.py
+      - data/interim/geocode.parquet
       - src/administrative_district
       - data/complimentary/ao.cpg
       - data/complimentary/ao.dbf
@@ -63,24 +43,52 @@ stages:
       - data/complimentary/ao.shp
       - data/complimentary/ao.shx
     outs:
-      - data/interim/05_administrative_district.parquet
-
-
-  06_publish_processed:
-    cmd: python -m src.stages.06_publish_processed
+      - data/interim/administrative_district.parquet
+    
+  split:
+    cmd: python -m src.stages.split
     deps:
-      - data/interim/05_administrative_district.parquet
-      - src/stages/06_publish_processed.py
+      - src/stages/split.py
+      - data/interim/administrative_district.parquet
     outs:
-      - data/processed/final.parquet
-      - data/processed/final.csv
+      - data/interim/split_train.parquet
+      - data/interim/split_valid.parquet
+      - data/interim/split_test.parquet
 
-  06_report:
-    cmd: python -m src.stages.06_report
+  price_discount:
+    cmd: python -m src.stages.price_discount
     deps:
-      - src/stages/06_report.py
-      - src/report
-      - data/interim/05_administrative_district.parquet
-      
+      - src/stages/price_discount.py
+      - data/interim/split_train.parquet
+      - data/interim/split_valid.parquet
+      - data/interim/split_test.parquet
+    outs:
+      - data/interim/price_discount_train.parquet
+      - data/interim/price_discount_valid.parquet
+      - data/interim/price_discount_test.parquet
+  
+  ksearch:
+    cmd: python -m src.stages.ksearch
+    deps:
+      - data/interim/price_discount_train.parquet
+      - src/stages/ksearch.py
     params:
-      - 02_geocode
+      - ksearch
+    outs:
+      - report/ksearch_metrics.json
+      - report/ksearch_plot.png
+
+  wnir:
+    cmd: python -m src.stages.wnir
+    deps:
+      - data/interim/price_discount_train.parquet
+      - data/interim/price_discount_valid.parquet
+      - data/interim/price_discount_test.parquet
+      - src/stages/wnir.py
+    params:
+      - wnir
+    outs:
+      - data/interim/wnir_train.parquet
+      - data/interim/wnir_valid.parquet
+      - data/interim/wnir_test.parquet
+

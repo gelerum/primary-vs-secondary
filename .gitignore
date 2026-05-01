@@ -2,12 +2,15 @@ data/cache/*
 data/interim/*
 data/processed/*
 data/raw/*
+report/*
 
 
 !data/cache/.gitkeep
 !data/interim/.gitkeep
 !data/processed/.gitkeep
 !data/raw/.gitkeep
+!report/.gitkeep
+
 
 !*.dvc
 !.dvc/config
