@@ -771,12 +771,12 @@ stages:
     outs:
     - path: report/ksearch_metrics.json
       hash: md5
-      md5: 881980ecf0061397e8c9b96f1d7aaeb0
+      md5: 432062d18c4c414cee80c3d9883ec18f
       size: 52
     - path: report/ksearch_plot.png
       hash: md5
-      md5: bc4342bd4814c873848f52c39ce0def6
-      size: 96966
+      md5: 5d4209d7fbcbcf063072a7895b6ec91f
+      size: 104077
   wnir:
     cmd: python -m src.stages.wnir
     deps:
@@ -794,8 +794,8 @@ stages:
       size: 2740530
     - path: src/stages/wnir.py
       hash: md5
-      md5: ef33695dd5002f31e1528d1d69a87c27
-      size: 3053
+      md5: 549f86a257e43e1485038d4b5bd08fac
+      size: 3082
     params:
       params.yaml:
         wnir:
@@ -810,13 +810,13 @@ stages:
     outs:
     - path: data/interim/wnir_test.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 6771d08bed832ef6ca9218ad75e26107
+      size: 41340
     - path: data/interim/wnir_train.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: f2e0b24dd2bde9066b69921262720a47
+      size: 159126
     - path: data/interim/wnir_valid.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: fd2d6c6fe1768a7b17ba44d52cd18b40
+      size: 51138
