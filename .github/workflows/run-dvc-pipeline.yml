@@ -7,6 +7,7 @@ jobs:
   run_pipeline_and_commit:
     name: Run DVC in Docker and Commit Changes
     runs-on: self-hosted
+    timeout-minutes: 1440
 
     permissions:
       contents: write

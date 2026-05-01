@@ -18,7 +18,9 @@ def main():
     df_test = pd.read_parquet("data/interim/price_discount_test.parquet")
     df_test["set_type"] = "test"
 
-    df = pd.concat([df_train, df_valid, df_test], axis=0, ignore_index=True)
+    df = pd.concat([df_train, df_valid, df_test], axis=0, ignore_index=True).sample(
+        10_000
+    )
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date").reset_index(drop=True)
     gc.collect()
