@@ -75,6 +75,7 @@ jobs:
               # 🔥 FIX: Remove the --cache-dir flags from pull and push
               dvc pull --force
               dvc repro --force
+              dvc commit
               dvc push
 
               echo "=== DVC pipeline finished successfully ==="
