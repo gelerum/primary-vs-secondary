@@ -1,5 +1,4 @@
-# src/wnir/wnir.py
-
+import gc
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
@@ -15,13 +14,7 @@ def _calculate_wnir_for_batch(
     R: float,
     h: float,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Вспомогательная функция для расчета WNIR для одного пакета (query)
-    на основе исторического дерева (history).
-    """
     radius_rad = R / EARTH_RADIUS
-
-    # Находим соседей для точек из пакета в историческом дереве
     indices_array, dists_array_rad = history_tree.query_radius(
         query_coords_rad, r=radius_rad, return_distance=True, sort_results=True
     )
@@ -31,7 +24,6 @@ def _calculate_wnir_for_batch(
     neighbor_counts = np.zeros(n_query, dtype=np.int32)
 
     for i, (inds, dists_rad) in enumerate(zip(indices_array, dists_array_rad)):
-        # У нас нет "себя" в историческом дереве, поэтому не нужно отбрасывать inds[0]
         if len(inds) == 0:
             continue
 
@@ -86,15 +78,13 @@ def process_markets_in_batches(
     price_col: str = "price_per_square_meter_normalized",
 ) -> pd.DataFrame:
 
-    # Оставляем только строки первички для итогового результата
     is_primary_mask = df["market_type"] == "primary"
 
-    # Подготавливаем колонки
+    # Подготавливаем список всех колонок согласно запросу
     cols = []
     for r in Rs:
-        # Параметры по СВОЕМУ рынку (Первичка -> Первичка)
-        cols.extend([f"wnir_p_{r}"])
-        # Параметры по КОНТЕКСТУ (Первичка -> Вторичка)
+        cols.append(f"wnir_p_value_{r}")
+        cols.append(f"wnir_s_value_{r}")  # Новая колонка
         cols.extend(
             [
                 f"wnir_s_mean_{r}",
@@ -110,7 +100,6 @@ def process_markets_in_batches(
         index=df[is_primary_mask].index, columns=cols, dtype=np.float32
     )
 
-    # Две истории для построения деревьев
     history_p = {
         "coords": np.empty((0, 2), dtype=np.float32),
         "vals": np.empty(0, dtype=np.float32),
@@ -123,40 +112,42 @@ def process_markets_in_batches(
 
     for i in tqdm(range(0, len(df), batch_size), desc="Processing timeline"):
         batch = df.iloc[i : i + batch_size]
-
-        # Нам нужны координаты всех объектов в батче для обновления истории
         batch_coords = np.radians(
             batch[["latitude", "longitude"]].values.astype(np.float32)
         )
         batch_p_mask = (batch["market_type"] == "primary").values
 
-        # Точки ПЕРВИЧКИ из текущего батча, для которых считаем признаки
         query_coords_p = batch_coords[batch_p_mask]
         query_indices_p = batch.index[batch_p_mask]
 
         if len(query_coords_p) > 0:
             for r in Rs:
-                # 1. Считаем по дереву ПЕРВИЧКИ (WNIR)
+                # 1. Считаем по СВОЕМУ рынку (Primary -> Primary)
                 if tree_p:
                     wnir_p, _ = _calculate_wnir_for_batch(
                         query_coords_p, tree_p, history_p["vals"], r, h
                     )
-                    final_results.loc[query_indices_p, f"wnir_p_{r}"] = wnir_p
+                    final_results.loc[query_indices_p, f"wnir_p_value_{r}"] = wnir_p
 
-                # 2. Считаем расширенную статистику по дереву ВТОРИЧКИ
+                # 2. Считаем по ВТОРИЧНОМУ рынку (Primary -> Secondary)
                 if tree_s:
+                    # Считаем WNIR (взвешенное значение)
+                    wnir_s, _ = _calculate_wnir_for_batch(
+                        query_coords_p, tree_s, history_s["vals"], r, h
+                    )
+                    final_results.loc[query_indices_p, f"wnir_s_value_{r}"] = wnir_s
+
+                    # Считаем остальные статистики
                     stats_s = _calculate_extended_context_stats(
                         query_coords_p, tree_s, history_s["vals"], r
                     )
-                    # Префикс _s чтобы не запутаться (источник - secondary)
                     stats_s.columns = [
-                        f"{c}_s_{r}"
+                        f"wnir_s_{c}_{r}"
                         for c in ["mean", "std", "min", "max", "median", "count"]
                     ]
                     final_results.loc[query_indices_p, stats_s.columns] = stats_s.values
 
-        # ВАЖНО: Обновляем обе истории, чтобы деревья росли
-        # Даже если мы не считаем признаки для вторички, она нужна нам как контекст
+        # Обновление истории
         p_in_batch = batch[batch["market_type"] == "primary"]
         s_in_batch = batch[batch["market_type"] == "secondary"]
 
@@ -177,5 +168,8 @@ def process_markets_in_batches(
                 [history_s["vals"], s_in_batch[price_col].values]
             )
             tree_s = BallTree(history_s["coords"], metric="haversine")
+
+    del history_p, history_s, tree_p, tree_s
+    gc.collect()
 
     return final_results

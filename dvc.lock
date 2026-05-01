@@ -794,8 +794,8 @@ stages:
       size: 2740530
     - path: src/stages/wnir.py
       hash: md5
-      md5: d363cc90f2fc0e34379acdaecb447bd6
-      size: 2155
+      md5: ef33695dd5002f31e1528d1d69a87c27
+      size: 3053
     params:
       params.yaml:
         wnir:
