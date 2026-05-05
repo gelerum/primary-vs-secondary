@@ -761,22 +761,30 @@ stages:
       size: 69521972
     - path: src/stages/ksearch.py
       hash: md5
-      md5: 9e673244e0b778fe111569ab8cfcf36a
-      size: 3440
+      md5: a97bdd6092113f57df16a6c46a733978
+      size: 4133
     params:
       params.yaml:
         ksearch:
           min_k: 2
           max_k: 200
     outs:
+    - path: models/kmeans_model.joblib
+      hash: md5
+      md5: d5501c667216cfe2684755a49773cfbb
+      size: 4853379
+    - path: models/kmeans_preprocessor.joblib
+      hash: md5
+      md5: e73a454bb51830d61436694902efbb2c
+      size: 2411
     - path: report/ksearch_metrics.json
       hash: md5
       md5: d6e1a2129929d522d0aeb0fa5e4cca37
       size: 53
     - path: report/ksearch_plot.png
       hash: md5
-      md5: e62bb1282f6e9c51f894e1baf198a264
-      size: 139931
+      md5: eeee8823c1c00ad57255a891fa280946
+      size: 103748
   wnir:
     cmd: python -m src.stages.wnir
     deps:
@@ -856,3 +864,78 @@ stages:
       hash: md5
       md5: 0388268a576cdfcb208348f012b0cd9a
       size: 11507994
+  apply_clusters_train:
+    cmd: python -m src.stages.apply_clusters data/interim/umap_train.parquet 
+      data/interim/clusters_train.parquet
+    deps:
+    - path: data/interim/umap_train.parquet
+      hash: md5
+      md5: 0cda989007d65730a2bf5a16bffaec46
+      size: 69521972
+    - path: models/kmeans_model.joblib
+      hash: md5
+      md5: d5501c667216cfe2684755a49773cfbb
+      size: 4853379
+    - path: models/kmeans_preprocessor.joblib
+      hash: md5
+      md5: e73a454bb51830d61436694902efbb2c
+      size: 2411
+    - path: src/stages/apply_clusters.py
+      hash: md5
+      md5: ed5f76bcdd5b91989aa4ef7a6197a05a
+      size: 1525
+    outs:
+    - path: data/interim/clusters_train.parquet
+      hash: md5
+      md5: d803cb76aef5ad371bec45106bc65ed4
+      size: 70430901
+  apply_clusters_valid:
+    cmd: python -m src.stages.apply_clusters data/interim/umap_valid.parquet 
+      data/interim/clusters_valid.parquet
+    deps:
+    - path: data/interim/umap_valid.parquet
+      hash: md5
+      md5: 0388268a576cdfcb208348f012b0cd9a
+      size: 11507994
+    - path: models/kmeans_model.joblib
+      hash: md5
+      md5: d5501c667216cfe2684755a49773cfbb
+      size: 4853379
+    - path: models/kmeans_preprocessor.joblib
+      hash: md5
+      md5: e73a454bb51830d61436694902efbb2c
+      size: 2411
+    - path: src/stages/apply_clusters.py
+      hash: md5
+      md5: ed5f76bcdd5b91989aa4ef7a6197a05a
+      size: 1525
+    outs:
+    - path: data/interim/clusters_valid.parquet
+      hash: md5
+      md5: 4d0a6312772af3d48c43b438591ee3ab
+      size: 11641284
+  apply_clusters_test:
+    cmd: python -m src.stages.apply_clusters data/interim/umap_test.parquet 
+      data/interim/clusters_test.parquet
+    deps:
+    - path: data/interim/umap_test.parquet
+      hash: md5
+      md5: 6a5cdca40edb95e1eb3c8fcdea26c3a2
+      size: 9760236
+    - path: models/kmeans_model.joblib
+      hash: md5
+      md5: d5501c667216cfe2684755a49773cfbb
+      size: 4853379
+    - path: models/kmeans_preprocessor.joblib
+      hash: md5
+      md5: e73a454bb51830d61436694902efbb2c
+      size: 2411
+    - path: src/stages/apply_clusters.py
+      hash: md5
+      md5: ed5f76bcdd5b91989aa4ef7a6197a05a
+      size: 1525
+    outs:
+    - path: data/interim/clusters_test.parquet
+      hash: md5
+      md5: db546cce90990f98504310b7c1b79eb5
+      size: 9870747

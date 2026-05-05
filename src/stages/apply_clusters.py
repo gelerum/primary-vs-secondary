@@ -21,7 +21,7 @@ def main():
 
     # 2. Загрузка сохраненных моделей
     # Эти файлы должны быть созданы на этапе ksearch
-    preprocessor = joblib.load("models/preprocessor.joblib")
+    preprocessor = joblib.load("models/kmeans_preprocessor.joblib")
     model = joblib.load("models/kmeans_model.joblib")
 
     # 3. Препроцессинг

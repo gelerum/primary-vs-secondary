@@ -71,12 +71,12 @@ stages:
     cmd: python -m src.stages.ksearch data/interim/umap_train.parquet
     deps:
       - data/interim/umap_train.parquet
-      - models/kmeans_preprocessor.joblib
-      - models/kmeans_model.joblib
       - src/stages/ksearch.py
     params:
       - ksearch
     outs:
+      - models/kmeans_preprocessor.joblib
+      - models/kmeans_model.joblib
       - report/ksearch_metrics.json
       - report/ksearch_plot.png
 
@@ -109,31 +109,31 @@ stages:
       - data/interim/umap_test.parquet
 
   apply_clusters_train:
-    cmd: python apply_clusters.py data/umap_train.parquet data/processed/clusters_train.parquet
+    cmd: python -m src.stages.apply_clusters data/interim/umap_train.parquet data/interim/clusters_train.parquet
     deps:
-      - apply_clusters.py
-      - data/umap_train.parquet
+      - src/stages/apply_clusters.py
+      - data/interim/umap_train.parquet
       - models/kmeans_preprocessor.joblib
       - models/kmeans_model.joblib
     outs:
-      - data/processed/clusters_train.parquet
+      - data/interim/clusters_train.parquet
 
   apply_clusters_valid:
-    cmd: python apply_clusters.py data/umap_valid.parquet data/processed/clusters_valid.parquet
+    cmd: python -m src.stages.apply_clusters data/interim/umap_valid.parquet data/interim/clusters_valid.parquet
     deps:
-      - apply_clusters.py
-      - data/umap_valid.parquet
+      - src/stages/apply_clusters.py
+      - data/interim/umap_valid.parquet
       - models/kmeans_preprocessor.joblib
       - models/kmeans_model.joblib
     outs:
-      - data/processed/clusters_valid.parquet
+      - data/interim/clusters_valid.parquet
 
   apply_clusters_test:
-    cmd: python apply_clusters.py data/umap_test.parquet data/processed/clusters_test.parquet
+    cmd: python -m src.stages.apply_clusters data/interim/umap_test.parquet data/interim/clusters_test.parquet
     deps:
-      - apply_clusters.py
-      - data/umap_test.parquet
+      - src/stages/apply_clusters.py
+      - data/interim/umap_test.parquet
       - models/kmeans_preprocessor.joblib
       - models/kmeans_model.joblib
     outs:
-      - data/processed/clusters_test.parquet
+      - data/interim/clusters_test.parquet
