@@ -108,7 +108,7 @@ stages:
       - data/interim/umap_valid.parquet
       - data/interim/umap_test.parquet
 
-apply_clusters_train:
+  apply_clusters_train:
     cmd: python apply_clusters.py data/umap_train.parquet data/processed/clusters_train.parquet
     deps:
       - apply_clusters.py
@@ -118,7 +118,7 @@ apply_clusters_train:
     outs:
       - data/processed/clusters_train.parquet
 
-apply_clusters_valid:
+  apply_clusters_valid:
     cmd: python apply_clusters.py data/umap_valid.parquet data/processed/clusters_valid.parquet
     deps:
       - apply_clusters.py
