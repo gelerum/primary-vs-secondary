@@ -1,3 +1,4 @@
+import argparse
 import json
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -10,7 +11,16 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
 
 def main():
-    df_train = pd.read_parquet("data/interim/price_discount_train.parquet")
+    parser = argparse.ArgumentParser(description="Load a training dataset.")
+
+    # Define the file path argument
+    parser.add_argument("filepath", type=str, help="Path to the training parquet file")
+
+    # Parse the arguments from the command line
+    args = parser.parse_args()
+
+    # Use the provided argument to load the dataframe
+    df_train = pd.read_parquet(args.filepath)
 
     date_cols = ["date", "year", "month", "day"]
     price_cols = ["price_per_square_meter_normalized", "price_normalized"]

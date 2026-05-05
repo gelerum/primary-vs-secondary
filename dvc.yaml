@@ -68,9 +68,9 @@ stages:
       - data/interim/price_discount_test.parquet
   
   ksearch:
-    cmd: python -m src.stages.ksearch
+    cmd: python -m src.stages.ksearch data/interim/umap_train.parquet
     deps:
-      - data/interim/price_discount_train.parquet
+      - data/interim/umap_train.parquet
       - src/stages/ksearch.py
     params:
       - ksearch

@@ -28,7 +28,7 @@ geocode:
 
 ksearch:
   min_k: 2
-  max_k: 20
+  max_k: 200
 
 wnir:
   h: 100

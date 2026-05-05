@@ -753,30 +753,30 @@ stages:
       md5: 48fb73d910159373d37cefdf8424621c
       size: 3680479
   ksearch:
-    cmd: python -m src.stages.ksearch
+    cmd: python -m src.stages.ksearch data/interim/umap_train.parquet
     deps:
-    - path: data/interim/price_discount_train.parquet
+    - path: data/interim/umap_train.parquet
       hash: md5
-      md5: 294add20561f4ab79715125088ab3de8
-      size: 18326447
+      md5: 0cda989007d65730a2bf5a16bffaec46
+      size: 69521972
     - path: src/stages/ksearch.py
       hash: md5
-      md5: 3822cb7b076adae09d5468f37277f370
-      size: 3117
+      md5: 9e673244e0b778fe111569ab8cfcf36a
+      size: 3440
     params:
       params.yaml:
         ksearch:
           min_k: 2
-          max_k: 20
+          max_k: 200
     outs:
     - path: report/ksearch_metrics.json
       hash: md5
-      md5: 432062d18c4c414cee80c3d9883ec18f
-      size: 52
+      md5: 62f6bfb77e2b8791c7fd7b38d0ee7d71
+      size: 53
     - path: report/ksearch_plot.png
       hash: md5
-      md5: 5d4209d7fbcbcf063072a7895b6ec91f
-      size: 104077
+      md5: c88b530d3bd8a1e46a0178e642bda9fa
+      size: 105366
   wnir:
     cmd: python -m src.stages.wnir
     deps:
