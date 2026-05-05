@@ -3,7 +3,9 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from umap import UMAP
+
+# Replace standard umap with cuml
+from cuml.manifold import UMAP
 
 
 def main():
@@ -56,11 +58,12 @@ def main():
         ]
     )
 
-    print(f"Fitting UMAP pipeline ({n_comp} components)...")
+    print(f"Fitting GPU UMAP pipeline ({n_comp} components)...")
     X_train = df_train.drop(columns=cols_to_exclude, errors="ignore")
+    # cuML handles the conversion from NumPy/Pandas to GPU memory automatically
     umap_train = pipeline.fit_transform(X_train)
 
-    print("Transforming validation and test sets...")
+    print("Transforming validation and test sets on GPU...")
     umap_valid = pipeline.transform(
         df_valid.drop(columns=cols_to_exclude, errors="ignore")
     )
@@ -72,6 +75,8 @@ def main():
 
     def create_final_df(original_df, umap_array, col_names):
         meta = original_df[cols_to_exclude]
+        # umap_array returned by cuML might be a CuPy array;
+        # convert to numpy if needed, though pd.DataFrame usually handles it.
         umap_df = pd.DataFrame(umap_array, columns=col_names, index=original_df.index)
         return pd.concat([meta, umap_df], axis=1)
 
