@@ -820,3 +820,39 @@ stages:
       hash: md5
       md5: b9c9bd2a6fbcb4599b1d684f44880701
       size: 6853399
+  umap:
+    cmd: python -m src.stages.umap
+    deps:
+    - path: data/interim/price_discount_test.parquet
+      hash: md5
+      md5: 1d5ae280879ceb8652906ce6e3a508d5
+      size: 2319877
+    - path: data/interim/price_discount_train.parquet
+      hash: md5
+      md5: 294add20561f4ab79715125088ab3de8
+      size: 18326447
+    - path: data/interim/price_discount_valid.parquet
+      hash: md5
+      md5: 25406a0e816336c4343a2f507f5d3f45
+      size: 2740530
+    - path: src/stages/umap.py
+      hash: md5
+      md5: bbcd103c519dd402e8aebb6d558b265a
+      size: 2959
+    params:
+      params.yaml:
+        umap:
+          umap_n_components: 10
+    outs:
+    - path: data/interim/umap_test.parquet
+      hash: md5
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
+    - path: data/interim/umap_train.parquet
+      hash: md5
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
+    - path: data/interim/umap_valid.parquet
+      hash: md5
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0

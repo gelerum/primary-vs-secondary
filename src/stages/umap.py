@@ -49,8 +49,7 @@ def main():
                 UMAP(
                     n_components=n_comp,
                     n_neighbors=30,
-                    # random_state=42,
-                    n_jobs=-1,
+                    random_state=42,
                     verbose=True,
                 ),
             ),
