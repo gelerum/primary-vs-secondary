@@ -837,8 +837,8 @@ stages:
       size: 2740530
     - path: src/stages/umap.py
       hash: md5
-      md5: bbcd103c519dd402e8aebb6d558b265a
-      size: 2959
+      md5: 3d6fbc350c8c956ce5173f2bb63ed110
+      size: 3233
     params:
       params.yaml:
         umap:
@@ -846,13 +846,13 @@ stages:
     outs:
     - path: data/interim/umap_test.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 6a5cdca40edb95e1eb3c8fcdea26c3a2
+      size: 9760236
     - path: data/interim/umap_train.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 0cda989007d65730a2bf5a16bffaec46
+      size: 69521972
     - path: data/interim/umap_valid.parquet
       hash: md5
-      md5: d41d8cd98f00b204e9800998ecf8427e
-      size: 0
+      md5: 0388268a576cdfcb208348f012b0cd9a
+      size: 11507994
