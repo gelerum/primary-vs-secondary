@@ -1,5 +1,7 @@
 import argparse
 import json
+import os
+import joblib  # Добавляем для сохранения моделей
 import pandas as pd
 import matplotlib.pyplot as plt
 from dvc.api import params_show
@@ -12,16 +14,12 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
 def main():
     parser = argparse.ArgumentParser(description="Load a training dataset.")
-
-    # Define the file path argument
     parser.add_argument("filepath", type=str, help="Path to the training parquet file")
-
-    # Parse the arguments from the command line
     args = parser.parse_args()
 
-    # Use the provided argument to load the dataframe
     df_train = pd.read_parquet(args.filepath)
 
+    # --- Подготовка признаков ---
     date_cols = ["date", "year", "month", "day"]
     price_cols = ["price_per_square_meter_normalized", "price_normalized"]
     num_cols = [
@@ -38,23 +36,24 @@ def main():
     preprocessor = ColumnTransformer(
         transformers=[
             ("num", StandardScaler(), num_cols),
-            ("cat", OneHotEncoder(), cat_cols),
+            ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols),
         ]
     )
 
+    # --- Параметры из DVC ---
     params = params_show()["ksearch"]
     k_min = params["min_k"]
     k_max = params["max_k"]
 
-    # Семпл для метрик и визуализации (10к - оптимально для UMAP)
     sample_size = 10_000
     if len(df_train) > sample_size:
-        X_sample = df_train.sample(sample_size, random_state=42)
+        X_sample_raw = df_train.sample(sample_size, random_state=42)
     else:
-        X_sample = df_train
+        X_sample_raw = df_train
 
-    df_train = preprocessor.fit_transform(df_train)
-    X_sample = preprocessor.transform(X_sample)
+    # Обучаем препроцессор и трансформируем данные
+    df_train_proc = preprocessor.fit_transform(df_train)
+    X_sample_proc = preprocessor.transform(X_sample_raw)
 
     results = []
     best_k_sil = k_min
@@ -71,11 +70,11 @@ def main():
             n_init=3,
             max_no_improvement=10,
         )
-        model.fit(df_train)
+        model.fit(df_train_proc)
 
         inertia = model.inertia_
-        sample_labels = model.predict(X_sample)
-        score = silhouette_score(X_sample, sample_labels) if k > 1 else 0
+        sample_labels = model.predict(X_sample_proc)
+        score = silhouette_score(X_sample_proc, sample_labels) if k > 1 else 0
 
         results.append(
             {"k": int(k), "silhouette": float(score), "inertia": float(inertia)}
@@ -86,30 +85,41 @@ def main():
             best_k_sil = k
             best_model = model
 
+    # --- Сохранение артефактов ---
+    os.makedirs("report", exist_ok=True)
+    os.makedirs("models", exist_ok=True)  # Папка для моделей
+
+    # 1. Графики
     res_df = pd.DataFrame(results)
-    fig, axs = plt.subplots(1, 2, figsize=(20, 15))
+    fig, axs = plt.subplots(
+        1, 2, figsize=(20, 10)
+    )  # Чуть уменьшил высоту для адекватности
 
     axs[0].plot(res_df["k"], res_df["inertia"], marker="o", color="green")
-    axs[0].set_title("Elbow Method")
-    axs[0].set_ylabel("Inertia")
-    axs[0].grid(True, alpha=0.3)
-
+    axs[0].set_title("Elbow Method (Inertia)")
     axs[1].plot(res_df["k"], res_df["silhouette"], marker="o", color="blue")
     axs[1].axvline(
         x=best_k_sil, color="red", linestyle="--", label=f"Best k={best_k_sil}"
     )
     axs[1].set_title("Silhouette Score")
-    axs[1].set_ylabel("Score")
     axs[1].legend()
-    axs[1].grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig("report/ksearch_plot.png")
 
+    # 2. Метрики
     with open("report/ksearch_metrics.json", "w") as f:
         json.dump(
             {"best_k": int(best_k_sil), "max_silhouette": float(max_silhouette)}, f
         )
+
+    # 3. МОДЕЛИ (Самое важное)
+    # Сохраняем препроцессор, чтобы точно так же обработать test/valid
+    joblib.dump(preprocessor, "models/kmeans_preprocessor.joblib")
+    # Сохраняем саму модель KMeans
+    joblib.dump(best_model, "models/kmeans_model.joblib")
+
+    print(f"Done! Best k: {best_k_sil}. Models saved in 'models/'")
 
 
 if __name__ == "__main__":
