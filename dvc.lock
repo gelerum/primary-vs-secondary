@@ -771,12 +771,12 @@ stages:
     outs:
     - path: report/ksearch_metrics.json
       hash: md5
-      md5: 62f6bfb77e2b8791c7fd7b38d0ee7d71
+      md5: d6e1a2129929d522d0aeb0fa5e4cca37
       size: 53
     - path: report/ksearch_plot.png
       hash: md5
-      md5: c88b530d3bd8a1e46a0178e642bda9fa
-      size: 105366
+      md5: e62bb1282f6e9c51f894e1baf198a264
+      size: 139931
   wnir:
     cmd: python -m src.stages.wnir
     deps:
