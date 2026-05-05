@@ -39,3 +39,6 @@ wnir:
     max-med: 5000
     max: 10000
   batch_size: 20000
+
+umap:
+  umap_n_components: 10

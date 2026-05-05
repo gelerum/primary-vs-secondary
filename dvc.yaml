@@ -92,3 +92,16 @@ stages:
       - data/interim/wnir_valid.parquet
       - data/interim/wnir_test.parquet
 
+  umap:
+    cmd: python -m src.stages.umap
+    deps:
+      - data/interim/price_discount_train.parquet
+      - data/interim/price_discount_valid.parquet
+      - data/interim/price_discount_test.parquet
+      - src/stages/umap.py
+    params:
+      - umap
+    outs:
+      - data/interim/umap_train.parquet
+      - data/interim/umap_valid.parquet
+      - data/interim/umap_test.parquet
