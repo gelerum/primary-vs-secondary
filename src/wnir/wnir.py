@@ -144,6 +144,7 @@ def _compute_features(
     results: pd.DataFrame,
     orig_idx,
     market_type: str,
+    device="cuda",
 ):
     for r_tensor in Rs:
         r = float(r_tensor.item())
