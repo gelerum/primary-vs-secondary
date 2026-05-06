@@ -158,30 +158,34 @@ def _compute_features(
         weighted_sum = (weights * values).sum(dim=1)
         wnir = torch.where(weight_sum > 1e-8, weighted_sum / weight_sum, torch.nan)
 
-        prefix = (
-            f"wnir_{market_type}_value_{r_str}"
-            if market_type == "p"
-            else f"wnir_{market_type}_value_{r_str}"
-        )
-        results.loc[orig_idx, prefix] = wnir.cpu().numpy()
+        # WNIR value
+        if market_type == "p":
+            results.loc[orig_idx, f"wnir_p_value_{r_str}"] = wnir.cpu().numpy()
+        else:
+            results.loc[orig_idx, f"wnir_s_value_{r_str}"] = wnir.cpu().numpy()
 
         if market_type == "s":
             v = values.unsqueeze(0).expand(len(orig_idx), -1)
             masked = torch.where(mask, v, torch.nan)
 
             results.loc[orig_idx, f"wnir_s_mean_{r_str}"] = (
-                masked.nanmean(dim=1).cpu().numpy()
+                torch.nanmean(masked, dim=1).cpu().numpy()
             )
             results.loc[orig_idx, f"wnir_s_min_{r_str}"] = (
-                masked.nanmin(dim=1).cpu().numpy()
+                torch.nanmin(masked, dim=1).cpu().numpy()
             )
             results.loc[orig_idx, f"wnir_s_max_{r_str}"] = (
-                masked.nanmax(dim=1).cpu().numpy()
+                torch.nanmax(masked, dim=1).cpu().numpy()
             )
             results.loc[orig_idx, f"wnir_s_count_{r_str}"] = counts.cpu().numpy()
-            results.loc[orig_idx, f"wnir_s_std_{r_str}"] = (
-                torch.where(counts > 1, masked.nanstd(dim=1), 0.0).cpu().numpy()
+
+            # std
+            std_val = torch.where(
+                counts > 1, torch.nanstd(masked, dim=1), torch.zeros_like(counts)
             )
+            results.loc[orig_idx, f"wnir_s_std_{r_str}"] = std_val.cpu().numpy()
+
+            # median (самая тяжёлая операция)
             results.loc[orig_idx, f"wnir_s_median_{r_str}"] = (
                 torch.nanmedian(masked, dim=1).values.cpu().numpy()
             )
