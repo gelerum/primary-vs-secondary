@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import gc
+import warnings
 
 EARTH_RADIUS = 6371000.0
 
@@ -36,7 +37,7 @@ def process_markets_in_batches(
     df: pd.DataFrame,
     Rs: list[float],
     h: float,
-    batch_size: int = 16000,  # оптимально для RTX 3060 12GB
+    batch_size: int = 16000,
     price_col: str = "price_per_square_meter_normalized",
     device: str = "cuda",
 ) -> pd.DataFrame:
@@ -45,7 +46,7 @@ def process_markets_in_batches(
     torch.cuda.empty_cache()
 
     Rs = torch.tensor(Rs, device=device, dtype=torch.float32)
-    h = torch.tensor(h, device=device, dtype=torch.float32)
+    h_tensor = torch.tensor(h, device=device, dtype=torch.float32)
 
     primary_mask = df["market_type"] == "primary"
     primary_indices = df.index[primary_mask].copy()
@@ -75,6 +76,10 @@ def process_markets_in_batches(
     hist_s_coord = None
     hist_s_val = None
 
+    # Размер под-батча для query-координат, чтобы избежать OOM при росте истории (M)
+    # 1024 — безопасное значение даже когда размер истории достигает 500,000+ элементов
+    sub_batch_size = 1024
+
     for start in tqdm(range(0, len(df), batch_size), desc="WNIR GPU"):
         batch = df.iloc[start : start + batch_size]
         coords_np = batch[["latitude", "longitude"]].values.astype(np.float32)
@@ -86,25 +91,32 @@ def process_markets_in_batches(
         query_orig_idx = batch.index[is_primary]
 
         if len(query_coords) > 0:
-            # Primary market
-            if hist_p_coord is not None and len(hist_p_coord) > 0:
-                dists = haversine_distance(query_coords, hist_p_coord)
-                _compute_features(
-                    dists, hist_p_val, Rs, h, results, query_orig_idx, "p"
-                )
+            # Дробим внутри батча
+            for i in range(0, len(query_coords), sub_batch_size):
+                sub_qc = query_coords[i : i + sub_batch_size]
+                sub_idx = query_orig_idx[i : i + sub_batch_size]
 
-            # Secondary market
-            if hist_s_coord is not None and len(hist_s_coord) > 0:
-                dists = haversine_distance(query_coords, hist_s_coord)
-                _compute_features(
-                    dists, hist_s_val, Rs, h, results, query_orig_idx, "s"
-                )
+                # Primary market
+                if hist_p_coord is not None and len(hist_p_coord) > 0:
+                    dists = haversine_distance(sub_qc, hist_p_coord)
+                    _compute_features(
+                        dists, hist_p_val, Rs, h_tensor, results, sub_idx, "p", device
+                    )
+                    del dists  # Явное удаление матрицы дистанций
+
+                # Secondary market
+                if hist_s_coord is not None and len(hist_s_coord) > 0:
+                    dists = haversine_distance(sub_qc, hist_s_coord)
+                    _compute_features(
+                        dists, hist_s_val, Rs, h_tensor, results, sub_idx, "s", device
+                    )
+                    del dists
 
         # === Обновление истории ===
         p_coords = coords[query_mask]
         p_vals = torch.from_numpy(batch.loc[is_primary, price_col].values.copy()).to(
             device
-        )  # .copy() убирает warning
+        )
 
         s_coords = coords[~query_mask]
         s_vals = torch.from_numpy(batch.loc[~is_primary, price_col].values.copy()).to(
@@ -146,18 +158,29 @@ def _compute_features(
     market_type: str,
     device="cuda",
 ):
+    # Предрасчет экспоненты для весов один раз, чтобы не пересчитывать в цикле
+    # (позволяет избежать лишней фрагментации памяти)
+    exp_dists = torch.exp(-dists / h)
+
+    # Pre-expand values (не выделяет доп. память, создает view)
+    v = values.unsqueeze(0).expand(len(orig_idx), -1)
+
     for r_tensor in Rs:
         r = float(r_tensor.item())
-        r_str = str(int(r))
+        r_str = str(int(r)) if float(r).is_integer() else str(r)
 
         mask = dists <= r
         counts = mask.sum(dim=1, dtype=torch.float32)
 
-        weights = torch.exp(-dists / h) * mask
+        weights = exp_dists * mask
         weight_sum = weights.sum(dim=1)
 
         weighted_sum = (weights * values).sum(dim=1)
-        wnir = torch.where(weight_sum > 1e-8, weighted_sum / weight_sum, torch.nan)
+        wnir = torch.where(
+            weight_sum > 1e-8,
+            weighted_sum / weight_sum,
+            torch.tensor(float("nan"), device=device, dtype=torch.float32),
+        )
 
         # WNIR value
         if market_type == "p":
@@ -166,19 +189,16 @@ def _compute_features(
             results.loc[orig_idx, f"wnir_s_value_{r_str}"] = wnir.cpu().numpy()
 
         if market_type == "s":
-            # Подготовка данных: зануляем всё, что вне радиуса
-            v = values.unsqueeze(0).expand(len(orig_idx), -1)
             masked_v = torch.where(mask, v, torch.tensor(0.0, device=device))
 
-            # 1. Считаем Mean вручную
-            # Сумма значений / количество точек в радиусе
+            # 1. Считаем Mean
             sum_v = masked_v.sum(dim=1)
             mean_vals = torch.where(
                 counts > 0, sum_v / counts, torch.tensor(float("nan"), device=device)
             )
             results.loc[orig_idx, f"wnir_s_mean_{r_str}"] = mean_vals.cpu().numpy()
 
-            # 2. Считаем Min/Max (как в предыдущем совете)
+            # 2. Считаем Min/Max
             inf_tensor = torch.tensor(float("inf"), device=device)
             masked_for_min = torch.where(mask, v, inf_tensor)
             min_vals = torch.min(masked_for_min, dim=1).values
@@ -187,6 +207,7 @@ def _compute_features(
                 .cpu()
                 .numpy()
             )
+            del masked_for_min  # освобождаем память
 
             masked_for_max = torch.where(mask, v, -inf_tensor)
             max_vals = torch.max(masked_for_max, dim=1).values
@@ -195,27 +216,33 @@ def _compute_features(
                 .cpu()
                 .numpy()
             )
+            del masked_for_max  # освобождаем память
 
-            # 3. Считаем Std вручную (несмещенная оценка)
-            # Формула: sqrt( sum((x - mean)^2) / (n - 1) )
+            # 3. Считаем Std
             diff_sq = ((v - mean_vals.unsqueeze(1)) ** 2) * mask
             sum_diff_sq = diff_sq.sum(dim=1)
             var_vals = torch.where(
                 counts > 1, sum_diff_sq / (counts - 1), torch.tensor(0.0, device=device)
             )
             results.loc[orig_idx, f"wnir_s_std_{r_str}"] = var_vals.sqrt().cpu().numpy()
+            del diff_sq
 
             # 4. Количество
             results.loc[orig_idx, f"wnir_s_count_{r_str}"] = counts.cpu().numpy()
 
-            # 5. Median (самое больное место старых версий)
-            # Если torch.nanmedian нет, единственный быстрый способ — использовать numpy
-            # так как векторизовать медиану с разным количеством валидных элементов в PyTorch сложно
+            # 5. Median
             masked_np = (
                 torch.where(mask, v, torch.tensor(float("nan"), device=device))
                 .cpu()
                 .numpy()
             )
-            results.loc[orig_idx, f"wnir_s_median_{r_str}"] = np.nanmedian(
-                masked_np, axis=1
-            )
+
+            # Подавляем назойливые RuntimeWarning
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                medians = np.nanmedian(masked_np, axis=1)
+            results.loc[orig_idx, f"wnir_s_median_{r_str}"] = medians
+
+            del masked_v, masked_np
+
+        del mask, weights
