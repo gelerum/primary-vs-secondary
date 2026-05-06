@@ -1,92 +1,59 @@
-import gc
+import torch
 import numpy as np
 import pandas as pd
-from sklearn.neighbors import BallTree
 from tqdm import tqdm
+import gc
 
-EARTH_RADIUS = 6371000.0  # meters
+EARTH_RADIUS = 6371000.0
 
 
-def _calculate_wnir_for_batch(
-    query_coords_rad: np.ndarray,
-    history_tree: BallTree,
-    history_values: np.ndarray,
-    R: float,
-    h: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    radius_rad = R / EARTH_RADIUS
-    indices_array, dists_array_rad = history_tree.query_radius(
-        query_coords_rad, r=radius_rad, return_distance=True, sort_results=True
+def haversine_torch(lat1, lon1, lat2, lon2):
+    lat1 = torch.deg2rad(lat1)
+    lon1 = torch.deg2rad(lon1)
+    lat2 = torch.deg2rad(lat2)
+    lon2 = torch.deg2rad(lon2)
+
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = (
+        torch.sin(dlat * 0.5) ** 2
+        + torch.cos(lat1) * torch.cos(lat2) * torch.sin(dlon * 0.5) ** 2
     )
-
-    n_query = len(query_coords_rad)
-    wnir = np.full(n_query, np.nan, dtype=np.float32)
-    neighbor_counts = np.zeros(n_query, dtype=np.int32)
-
-    for i, (inds, dists_rad) in enumerate(zip(indices_array, dists_array_rad)):
-        if len(inds) == 0:
-            continue
-
-        dists_m = (dists_rad * EARTH_RADIUS).astype(np.float32)
-        neighbor_vals = history_values[inds]
-        neighbor_counts[i] = len(dists_m)
-
-        weights = np.exp(-dists_m / h)
-        weight_sum = weights.sum()
-
-        if weight_sum > 0:
-            wnir[i] = np.dot(weights, neighbor_vals) / weight_sum
-
-    return wnir, neighbor_counts
+    c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
+    return EARTH_RADIUS * c
 
 
-def _calculate_extended_context_stats(coords_rad, tree, values, R):
-    radius_rad = R / EARTH_RADIUS
-    indices = tree.query_radius(coords_rad, r=radius_rad)
-
-    n = len(coords_rad)
-    res = {
-        "mean": np.full(n, np.nan),
-        "std": np.full(n, np.nan),
-        "min": np.full(n, np.nan),
-        "max": np.full(n, np.nan),
-        "median": np.full(n, np.nan),
-        "count": np.zeros(n),
-    }
-
-    for i, inds in enumerate(indices):
-        if len(inds) > 0:
-            v = values[inds]
-            res["count"][i] = len(inds)
-            res["mean"][i] = np.mean(v)
-            res["min"][i] = np.min(v)
-            res["max"][i] = np.max(v)
-            res["median"][i] = np.median(v)
-            if len(inds) > 1:
-                res["std"][i] = np.std(v)
-            else:
-                res["std"][i] = 0.0
-
-    return pd.DataFrame(res)
-
-
+@torch.no_grad()
 def process_markets_in_batches(
     df: pd.DataFrame,
     Rs: list[float],
     h: float,
-    batch_size: int,
+    batch_size: int = 18000,  # оптимально для RTX 3060 12GB
     price_col: str = "price_per_square_meter_normalized",
+    device: str = "cuda",
 ) -> pd.DataFrame:
 
-    is_primary_mask = df["market_type"] == "primary"
+    device = torch.device(device)
+    torch.cuda.empty_cache()
 
-    # Подготавливаем список всех колонок согласно запросу
+    Rs = torch.tensor(Rs, device=device, dtype=torch.float32)
+    h = torch.tensor(h, device=device, dtype=torch.float32)
+
+    primary_mask = df["market_type"] == "primary"
+    primary_indices = df.index[primary_mask].copy()
+
+    # Создаём колонки
     cols = []
-    for r in Rs:
-        cols.append(f"wnir_p_value_{r}")
-        cols.append(f"wnir_s_value_{r}")  # Новая колонка
+    for r in map(
+        str,
+        Rs.cpu().numpy().astype(int)
+        if all(x.is_integer() for x in Rs.cpu().numpy())
+        else Rs.cpu().numpy(),
+    ):
         cols.extend(
             [
+                f"wnir_p_value_{r}",
+                f"wnir_s_value_{r}",
                 f"wnir_s_mean_{r}",
                 f"wnir_s_std_{r}",
                 f"wnir_s_min_{r}",
@@ -96,80 +63,120 @@ def process_markets_in_batches(
             ]
         )
 
-    final_results = pd.DataFrame(
-        index=df[is_primary_mask].index, columns=cols, dtype=np.float32
-    )
+    results = pd.DataFrame(index=primary_indices, columns=cols, dtype=np.float32)
 
-    history_p = {
-        "coords": np.empty((0, 2), dtype=np.float32),
-        "vals": np.empty(0, dtype=np.float32),
-    }
-    history_s = {
-        "coords": np.empty((0, 2), dtype=np.float32),
-        "vals": np.empty(0, dtype=np.float32),
-    }
-    tree_p, tree_s = None, None
+    # История на GPU
+    hist_p = {"coord": None, "val": None}
+    hist_s = {"coord": None, "val": None}
 
-    for i in tqdm(range(0, len(df), batch_size), desc="Processing timeline"):
-        batch = df.iloc[i : i + batch_size]
-        batch_coords = np.radians(
+    for start_idx in tqdm(range(0, len(df), batch_size), desc="WNIR GPU"):
+        batch = df.iloc[start_idx : start_idx + batch_size]
+        coords = torch.from_numpy(
             batch[["latitude", "longitude"]].values.astype(np.float32)
-        )
-        batch_p_mask = (batch["market_type"] == "primary").values
+        ).to(device)
 
-        query_coords_p = batch_coords[batch_p_mask]
-        query_indices_p = batch.index[batch_p_mask]
+        is_p = batch["market_type"].values == "primary"
+        query_coords = coords[is_p]
+        query_idx = batch.index[is_p]
 
-        if len(query_coords_p) > 0:
-            for r in Rs:
-                # 1. Считаем по СВОЕМУ рынку (Primary -> Primary)
-                if tree_p:
-                    wnir_p, _ = _calculate_wnir_for_batch(
-                        query_coords_p, tree_p, history_p["vals"], r, h
-                    )
-                    final_results.loc[query_indices_p, f"wnir_p_value_{r}"] = wnir_p
+        if len(query_coords) > 0:
+            # Расчёт по Primary
+            if hist_p["coord"] is not None:
+                dists = haversine_torch(
+                    query_coords[:, 0],
+                    query_coords[:, 1],
+                    hist_p["coord"][:, 0],
+                    hist_p["coord"][:, 1],
+                )
+                _update_results(dists, hist_p["val"], Rs, h, results, query_idx, "p")
 
-                # 2. Считаем по ВТОРИЧНОМУ рынку (Primary -> Secondary)
-                if tree_s:
-                    # Считаем WNIR (взвешенное значение)
-                    wnir_s, _ = _calculate_wnir_for_batch(
-                        query_coords_p, tree_s, history_s["vals"], r, h
-                    )
-                    final_results.loc[query_indices_p, f"wnir_s_value_{r}"] = wnir_s
+            # Расчёт по Secondary
+            if hist_s["coord"] is not None:
+                dists = haversine_torch(
+                    query_coords[:, 0],
+                    query_coords[:, 1],
+                    hist_s["coord"][:, 0],
+                    hist_s["coord"][:, 1],
+                )
+                _update_results(dists, hist_s["val"], Rs, h, results, query_idx, "s")
 
-                    # Считаем остальные статистики
-                    stats_s = _calculate_extended_context_stats(
-                        query_coords_p, tree_s, history_s["vals"], r
-                    )
-                    stats_s.columns = [
-                        f"wnir_s_{c}_{r}"
-                        for c in ["mean", "std", "min", "max", "median", "count"]
-                    ]
-                    final_results.loc[query_indices_p, stats_s.columns] = stats_s.values
+        # === Обновляем историю ===
+        p_mask = torch.from_numpy(is_p).to(device)
 
-        # Обновление истории
-        p_in_batch = batch[batch["market_type"] == "primary"]
-        s_in_batch = batch[batch["market_type"] == "secondary"]
-
-        if not p_in_batch.empty:
-            history_p["coords"] = np.vstack(
-                [history_p["coords"], batch_coords[batch_p_mask]]
+        if p_mask.any():
+            new_coords = coords[p_mask]
+            new_vals = torch.from_numpy(batch.loc[is_p, price_col].values).to(device)
+            hist_p["coord"] = (
+                new_coords
+                if hist_p["coord"] is None
+                else torch.cat([hist_p["coord"], new_coords])
             )
-            history_p["vals"] = np.concatenate(
-                [history_p["vals"], p_in_batch[price_col].values]
+            hist_p["val"] = (
+                new_vals
+                if hist_p["val"] is None
+                else torch.cat([hist_p["val"], new_vals])
             )
-            tree_p = BallTree(history_p["coords"], metric="haversine")
 
-        if not s_in_batch.empty:
-            history_s["coords"] = np.vstack(
-                [history_s["coords"], batch_coords[~batch_p_mask]]
+        s_mask = ~p_mask
+        if s_mask.any():
+            new_coords = coords[s_mask]
+            new_vals = torch.from_numpy(batch.loc[~is_p, price_col].values).to(device)
+            hist_s["coord"] = (
+                new_coords
+                if hist_s["coord"] is None
+                else torch.cat([hist_s["coord"], new_coords])
             )
-            history_s["vals"] = np.concatenate(
-                [history_s["vals"], s_in_batch[price_col].values]
+            hist_s["val"] = (
+                new_vals
+                if hist_s["val"] is None
+                else torch.cat([hist_s["val"], new_vals])
             )
-            tree_s = BallTree(history_s["coords"], metric="haversine")
 
-    del history_p, history_s, tree_p, tree_s
+    torch.cuda.empty_cache()
     gc.collect()
+    return results
 
-    return final_results
+
+def _update_results(dists, values, Rs, h, results_df, orig_idx, market_type):
+    for r_tensor in Rs:
+        r = float(r_tensor.item())
+        r_str = str(int(r))
+
+        mask = dists <= r
+        counts = mask.sum(dim=1, dtype=torch.float32)
+
+        weights = torch.exp(-dists / h) * mask
+        weight_sum = weights.sum(dim=1)
+
+        weighted_sum = (weights * values).sum(dim=1)
+        wnir = torch.where(weight_sum > 1e-8, weighted_sum / weight_sum, torch.nan)
+
+        prefix = f"wnir_{market_type}_"
+        results_df.loc[orig_idx, f"{prefix}value_{r_str}"] = wnir.cpu().numpy()
+
+        if market_type == "s":
+            v = values.unsqueeze(0).expand(len(orig_idx), -1)
+            masked_v = torch.where(mask, v, torch.nan)
+
+            results_df.loc[orig_idx, f"wnir_s_mean_{r_str}"] = (
+                masked_v.nanmean(dim=1).cpu().numpy()
+            )
+            results_df.loc[orig_idx, f"wnir_s_min_{r_str}"] = (
+                masked_v.nanmin(dim=1).cpu().numpy()
+            )
+            results_df.loc[orig_idx, f"wnir_s_max_{r_str}"] = (
+                masked_v.nanmax(dim=1).cpu().numpy()
+            )
+            results_df.loc[orig_idx, f"wnir_s_count_{r_str}"] = counts.cpu().numpy()
+
+            # std и median делаем чуть умнее
+            results_df.loc[orig_idx, f"wnir_s_std_{r_str}"] = (
+                torch.where(counts > 1, masked_v.nanstd(dim=1, correction=0), 0.0)
+                .cpu()
+                .numpy()
+            )
+
+            # Медиана — самое медленное. Можно отключить, если не критична
+            results_df.loc[orig_idx, f"wnir_s_median_{r_str}"] = (
+                torch.nanmedian(masked_v, dim=1).values.cpu().numpy()
+            )

@@ -20,7 +20,6 @@ def main():
 
     df = pd.concat([df_train, df_valid, df_test], axis=0, ignore_index=True)
 
-
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date").reset_index(drop=True)
     gc.collect()
