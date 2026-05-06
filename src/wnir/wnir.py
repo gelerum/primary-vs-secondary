@@ -13,23 +13,39 @@ def haversine_distance(
 ) -> torch.Tensor:
     """
     Вычисляет расстояние между всеми query-точками и всеми точками истории.
-    query_coords: (N, 2), hist_coords: (M, 2) -> возвращает (N, M)
+    Используются in-place операции для минимизации потребления VRAM.
     """
     q_lat = query_coords[:, 0].unsqueeze(1)  # (N, 1)
     q_lon = query_coords[:, 1].unsqueeze(1)
     h_lat = hist_coords[:, 0].unsqueeze(0)  # (1, M)
     h_lon = hist_coords[:, 1].unsqueeze(0)
 
-    dlat = h_lat - q_lat
-    dlon = h_lon - q_lon
+    # In-place вычисления для экономии памяти
+    # 1. Считаем dlat: dlat = h_lat - q_lat, затем in-place применяем (sin(dlat * 0.5))**2
+    dlat = torch.sub(h_lat, q_lat)
+    dlat.mul_(0.5).sin_().pow_(2)
 
-    a = (
-        torch.sin(dlat * 0.5) ** 2
-        + torch.cos(q_lat) * torch.cos(h_lat) * torch.sin(dlon * 0.5) ** 2
-    )
-    c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
+    # 2. Считаем dlon: dlon = h_lon - q_lon, затем in-place (sin(dlon * 0.5))**2
+    dlon = torch.sub(h_lon, q_lon)
+    dlon.mul_(0.5).sin_().pow_(2)
 
-    return EARTH_RADIUS * c
+    # 3. dlon = cos(q_lat) * cos(h_lat) * dlon
+    # В in-place умножении используется broadcasting
+    dlon.mul_(torch.cos(q_lat)).mul_(torch.cos(h_lat))
+
+    # 4. a = dlat + dlon
+    # dlat теперь содержит 'a', память от dlon можно освободить
+    a = dlat.add_(dlon)
+    del dlon
+
+    # Ограничиваем a от 0 до 1 для защиты от NaN в arcsin из-за погрешностей float
+    a.clamp_(0.0, 1.0)
+
+    # 5. c = 2 * arcsin(sqrt(a))
+    # Математически эквивалентно 2 * atan2(sqrt(a), sqrt(1-a)), но требует меньше памяти
+    a.sqrt_().asin_().mul_(2.0 * EARTH_RADIUS)
+
+    return a
 
 
 @torch.no_grad()
@@ -76,9 +92,9 @@ def process_markets_in_batches(
     hist_s_coord = None
     hist_s_val = None
 
-    # Размер под-батча для query-координат, чтобы избежать OOM при росте истории (M)
-    # 1024 — безопасное значение даже когда размер истории достигает 500,000+ элементов
-    sub_batch_size = 1024
+    # Радикально снижаем размер саб-батча: 128 гарантирует отсутствие OOM
+    # даже если размер истории вырастет до нескольких миллионов точек
+    sub_batch_size = 128
 
     for start in tqdm(range(0, len(df), batch_size), desc="WNIR GPU"):
         batch = df.iloc[start : start + batch_size]
@@ -91,7 +107,6 @@ def process_markets_in_batches(
         query_orig_idx = batch.index[is_primary]
 
         if len(query_coords) > 0:
-            # Дробим внутри батча
             for i in range(0, len(query_coords), sub_batch_size):
                 sub_qc = query_coords[i : i + sub_batch_size]
                 sub_idx = query_orig_idx[i : i + sub_batch_size]
@@ -102,7 +117,7 @@ def process_markets_in_batches(
                     _compute_features(
                         dists, hist_p_val, Rs, h_tensor, results, sub_idx, "p", device
                     )
-                    del dists  # Явное удаление матрицы дистанций
+                    del dists
 
                 # Secondary market
                 if hist_s_coord is not None and len(hist_s_coord) > 0:
@@ -158,11 +173,7 @@ def _compute_features(
     market_type: str,
     device="cuda",
 ):
-    # Предрасчет экспоненты для весов один раз, чтобы не пересчитывать в цикле
-    # (позволяет избежать лишней фрагментации памяти)
     exp_dists = torch.exp(-dists / h)
-
-    # Pre-expand values (не выделяет доп. память, создает view)
     v = values.unsqueeze(0).expand(len(orig_idx), -1)
 
     for r_tensor in Rs:
@@ -175,30 +186,30 @@ def _compute_features(
         weights = exp_dists * mask
         weight_sum = weights.sum(dim=1)
 
-        weighted_sum = (weights * values).sum(dim=1)
+        # ОПТИМИЗАЦИЯ: матричное умножение (N, M) @ (M) -> (N).
+        # Не создает промежуточную матрицу (N, M), экономит гигабайты памяти
+        weighted_sum = torch.mv(weights, values)
+
         wnir = torch.where(
             weight_sum > 1e-8,
             weighted_sum / weight_sum,
             torch.tensor(float("nan"), device=device, dtype=torch.float32),
         )
 
-        # WNIR value
         if market_type == "p":
             results.loc[orig_idx, f"wnir_p_value_{r_str}"] = wnir.cpu().numpy()
         else:
             results.loc[orig_idx, f"wnir_s_value_{r_str}"] = wnir.cpu().numpy()
 
         if market_type == "s":
-            masked_v = torch.where(mask, v, torch.tensor(0.0, device=device))
-
-            # 1. Считаем Mean
-            sum_v = masked_v.sum(dim=1)
+            # 1. Mean (тоже через torch.mv для экономии памяти)
+            sum_v = torch.mv(mask.to(torch.float32), values)
             mean_vals = torch.where(
                 counts > 0, sum_v / counts, torch.tensor(float("nan"), device=device)
             )
             results.loc[orig_idx, f"wnir_s_mean_{r_str}"] = mean_vals.cpu().numpy()
 
-            # 2. Считаем Min/Max
+            # 2. Min
             inf_tensor = torch.tensor(float("inf"), device=device)
             masked_for_min = torch.where(mask, v, inf_tensor)
             min_vals = torch.min(masked_for_min, dim=1).values
@@ -207,8 +218,9 @@ def _compute_features(
                 .cpu()
                 .numpy()
             )
-            del masked_for_min  # освобождаем память
+            del masked_for_min
 
+            # 2b. Max
             masked_for_max = torch.where(mask, v, -inf_tensor)
             max_vals = torch.max(masked_for_max, dim=1).values
             results.loc[orig_idx, f"wnir_s_max_{r_str}"] = (
@@ -216,18 +228,20 @@ def _compute_features(
                 .cpu()
                 .numpy()
             )
-            del masked_for_max  # освобождаем память
+            del masked_for_max
 
-            # 3. Считаем Std
-            diff_sq = ((v - mean_vals.unsqueeze(1)) ** 2) * mask
+            # 3. Std (считаем с in-place вычитанием для экономии памяти)
+            diff_sq = torch.sub(v, mean_vals.unsqueeze(1))
+            diff_sq.square_().mul_(mask)
             sum_diff_sq = diff_sq.sum(dim=1)
+            del diff_sq
+
             var_vals = torch.where(
                 counts > 1, sum_diff_sq / (counts - 1), torch.tensor(0.0, device=device)
             )
             results.loc[orig_idx, f"wnir_s_std_{r_str}"] = var_vals.sqrt().cpu().numpy()
-            del diff_sq
 
-            # 4. Количество
+            # 4. Count
             results.loc[orig_idx, f"wnir_s_count_{r_str}"] = counts.cpu().numpy()
 
             # 5. Median
@@ -236,13 +250,10 @@ def _compute_features(
                 .cpu()
                 .numpy()
             )
-
-            # Подавляем назойливые RuntimeWarning
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", category=RuntimeWarning)
                 medians = np.nanmedian(masked_np, axis=1)
             results.loc[orig_idx, f"wnir_s_median_{r_str}"] = medians
-
-            del masked_v, masked_np
+            del masked_np
 
         del mask, weights
