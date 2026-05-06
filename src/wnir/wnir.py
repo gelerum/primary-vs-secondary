@@ -166,17 +166,43 @@ def _compute_features(
 
         if market_type == "s":
             v = values.unsqueeze(0).expand(len(orig_idx), -1)
-            masked = torch.where(mask, v, torch.nan)
+
+            # Для mean/median/std оставляем NaN
+            masked = torch.where(
+                mask, v, torch.tensor(float("nan"), device=values.device)
+            )
 
             results.loc[orig_idx, f"wnir_s_mean_{r_str}"] = (
                 torch.nanmean(masked, dim=1).cpu().numpy()
             )
-            results.loc[orig_idx, f"wnir_s_min_{r_str}"] = (
-                torch.nanmin(masked, dim=1).cpu().numpy()
+
+            # --- БЕЗОПАСНЫЙ MIN ---
+            # Заменяем False в маске на +inf, чтобы они не учитывались при поиске минимума
+            masked_for_min = torch.where(
+                mask, v, torch.tensor(float("inf"), device=values.device)
             )
-            results.loc[orig_idx, f"wnir_s_max_{r_str}"] = (
-                torch.nanmax(masked, dim=1).cpu().numpy()
+            min_vals = torch.min(masked_for_min, dim=1).values
+            # Возвращаем NaN туда, где не было ни одного валидного значения (остался +inf)
+            min_vals = torch.where(
+                min_vals == float("inf"),
+                torch.tensor(float("nan"), device=values.device),
+                min_vals,
             )
+            results.loc[orig_idx, f"wnir_s_min_{r_str}"] = min_vals.cpu().numpy()
+
+            # --- БЕЗОПАСНЫЙ MAX ---
+            # Заменяем False в маске на -inf
+            masked_for_max = torch.where(
+                mask, v, torch.tensor(float("-inf"), device=values.device)
+            )
+            max_vals = torch.max(masked_for_max, dim=1).values
+            max_vals = torch.where(
+                max_vals == float("-inf"),
+                torch.tensor(float("nan"), device=values.device),
+                max_vals,
+            )
+            results.loc[orig_idx, f"wnir_s_max_{r_str}"] = max_vals.cpu().numpy()
+
             results.loc[orig_idx, f"wnir_s_count_{r_str}"] = counts.cpu().numpy()
 
             # std
@@ -185,7 +211,7 @@ def _compute_features(
             )
             results.loc[orig_idx, f"wnir_s_std_{r_str}"] = std_val.cpu().numpy()
 
-            # median (самая тяжёлая операция)
+            # median
             results.loc[orig_idx, f"wnir_s_median_{r_str}"] = (
                 torch.nanmedian(masked, dim=1).values.cpu().numpy()
             )
