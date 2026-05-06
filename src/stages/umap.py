@@ -31,6 +31,7 @@ def main():
         .columns.drop(cols_to_exclude, errors="ignore")
         .tolist()
     )
+    print(num_cols, cat_cols)
 
     preprocessor = ColumnTransformer(
         transformers=[
