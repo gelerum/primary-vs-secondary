@@ -25,10 +25,9 @@ def main():
     df = df.sort_values("date").reset_index(drop=True)
     gc.collect()
 
-    # Главный датафрейм первички, в который мы будем "складывать" фичи
-    df_primary_master = (
-        df[df["market_type"] == "primary"].drop(columns=["market_type"]).copy()
-    )
+    # ИЗМЕНЕНИЕ: Теперь мы сохраняем ВСЕ данные (и primary, и secondary)
+    # Колонку "market_type" тоже оставляем, иначе вы потом не отличите их друг от друга!
+    df_master = df.copy()
 
     # =========================================================================
     # 1. РАСЧЕТ ДЛЯ ВСЕХ ДАННЫХ (постфикс _all)
@@ -42,15 +41,20 @@ def main():
         device=device,
         fill_nearest_threshold=params["fill_nearest_threshold"],
     )
+
     # Присоединяем к мастер-датафрейму по индексу
-    df_primary_master = df_primary_master.join(new_features_all)
+    # Так как в new_features_all есть индексы только для primary,
+    # Pandas автоматически проставит NaN во всех колонках wnir для secondary.
+    df_master = df_master.join(new_features_all)
 
     print("\nSaving splits...")
     for stype in ["train", "valid", "test"]:
-        out_path = f"data/interim/wnir_{stype}.parquet"
-        df_primary_master[df_primary_master["set_type"] == stype].drop(
-            columns=["set_type"]
-        ).to_parquet(out_path, index=False)
+        out_path = f"data/interim/wnir_all_{stype}.parquet"
+
+        # Сохраняем обратно в соответствующие выборки
+        df_master[df_master["set_type"] == stype].drop(columns=["set_type"]).to_parquet(
+            out_path, index=False
+        )
 
     print("WNIR stage completed successfully.")
 
