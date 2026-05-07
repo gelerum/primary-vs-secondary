@@ -67,17 +67,17 @@ stages:
       - data/interim/price_discount_valid.parquet
       - data/interim/price_discount_test.parquet
   
-  wnir:
-    cmd: python -m src.stages.wnir
+  wnir_all:
+    cmd: python -m src.stages.wnir_all
     deps:
       - data/interim/price_discount_train.parquet
       - data/interim/price_discount_valid.parquet
       - data/interim/price_discount_test.parquet
-      - src/stages/wnir.py
+      - src/stages/wnir_all.py
     params:
       - wnir
     outs:
-      - data/interim/wnir_train.parquet
-      - data/interim/wnir_valid.parquet
-      - data/interim/wnir_test.parquet
+      - data/interim/wnir_all_train.parquet
+      - data/interim/wnir_all_valid.parquet
+      - data/interim/wnir_all_test.parquet
 

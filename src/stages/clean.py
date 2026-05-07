@@ -105,7 +105,10 @@ def main():
 
     df_no_flat_type = df_fileter_after_2017.drop(columns=["flat_type"])
 
-    df_clean = df_no_flat_type
+    df_no_balcony = df_no_flat_type.drop(columns=["balcony"])
+
+    df_clean = df_no_balcony
+
     # df_clean = cast_types(df_fileter_after_2017, CANONICAL_COLUMNS)
 
     df_clean.to_parquet("data/interim/clean.parquet", index=False, engine="pyarrow")

@@ -4,7 +4,181 @@ import pandas as pd
 from tqdm import tqdm
 import gc
 
+import math
+
 EARTH_RADIUS = 6371000.0
+
+
+def get_nearest_train_indices_gpu(
+    target_coords_rad: torch.Tensor,
+    source_coords_rad: torch.Tensor,
+    max_distance_meters: float = 5000.0,  # <-- ДОБАВИЛИ ПОРОГ (например, 5 км)
+    batch_size: int = 2048,
+    device: str = "cuda",
+):
+    """
+    Возвращает индексы ближайших точек и маску валидности
+    (True, если сосед найден в пределах max_distance_meters).
+    """
+    n_targets = len(target_coords_rad)
+    nearest_indices = torch.zeros(n_targets, dtype=torch.long, device=device)
+    valid_mask = torch.zeros(n_targets, dtype=torch.bool, device=device)
+
+    # Переводим метры в базис 'a', который мы считаем внутри функции,
+    # чтобы не считать арксинусы и корни для всей матрицы
+    # a = sin^2(d / 2R)
+    a_threshold = math.sin(max_distance_meters / (2.0 * EARTH_RADIUS)) ** 2
+
+    h_lat = source_coords_rad[:, 0].unsqueeze(0)
+    h_lon = source_coords_rad[:, 1].unsqueeze(0)
+
+    for i in range(0, n_targets, batch_size):
+        q_chunk = target_coords_rad[i : i + batch_size]
+        q_lat = q_chunk[:, 0].unsqueeze(1)
+        q_lon = q_chunk[:, 1].unsqueeze(1)
+
+        dlat = torch.sub(h_lat, q_lat).mul_(0.5).sin_().pow_(2)
+        dlon = torch.sub(h_lon, q_lon).mul_(0.5).sin_().pow_(2)
+        dlon.mul_(torch.cos(q_lat)).mul_(torch.cos(h_lat))
+
+        a = dlat.add_(dlon)
+
+        # Вместо argmin берем min, чтобы получить и индекс, и само расстояние (в виде 'a')
+        min_a, min_idx = torch.min(a, dim=1)
+
+        nearest_indices[i : i + batch_size] = min_idx
+        valid_mask[i : i + batch_size] = min_a <= a_threshold
+
+        del dlat, dlon, a, q_chunk, q_lat, q_lon, min_a, min_idx
+
+    return nearest_indices, valid_mask
+
+
+def calculate_and_impute_wnir(
+    df_group: pd.DataFrame,
+    Rs: list,
+    h: float,
+    batch_size: int,
+    suffix: str,
+    device: torch.device,
+    fill_nearest_threshold,
+) -> pd.DataFrame:
+    """
+    Выполняет расчет WNIR для переданного куска данных (df_group),
+    переименовывает колонки (добавляя suffix) и заполняет пропуски.
+    Возвращает DataFrame только для Primary рынка с новыми колонками.
+    """
+    print(f"\n--- Processing WNIR for: {suffix} ---")
+
+    # 1. Считаем фичи
+    df_results = process_markets_in_batches(df_group, Rs=Rs, h=h, batch_size=batch_size)
+
+    # Переименовываем колонки, добавляя постфикс (_all или _clusterName)
+    rename_dict = {col: f"{col}_{suffix}" for col in df_results.columns}
+    df_results = df_results.rename(columns=rename_dict)
+    new_cols = list(df_results.columns)
+
+    # 2. Выделяем первичку для этой группы
+    df_group_primary = df_group[df_group["market_type"] == "primary"].copy()
+
+    # Мержим результаты по индексам (индексы сохранены из оригинального датафрейма)
+    for col in new_cols:
+        df_group_primary[col] = df_results[col]
+
+    del df_results
+    gc.collect()
+
+    # 3. Заполняем пропуски на GPU
+    print(f"Filling missing values for {suffix}...")
+    coords_np = df_group_primary[["latitude", "longitude"]].values.astype(np.float32)
+    coords_tensor = torch.from_numpy(coords_np).to(device) * (torch.pi / 180.0)
+
+    for r in Rs:
+        r_str = str(int(r)) if float(r).is_integer() else str(r)
+
+        # Названия колонок с учетом постфикса
+        price_cols = [
+            f"wnir_p_value_{r_str}_{suffix}",
+            f"wnir_s_value_{r_str}_{suffix}",
+            f"wnir_s_mean_{r_str}_{suffix}",
+            f"wnir_s_min_{r_str}_{suffix}",
+            f"wnir_s_max_{r_str}_{suffix}",
+            f"wnir_s_median_{r_str}_{suffix}",
+        ]
+        count_col = f"wnir_s_count_{r_str}_{suffix}"
+        std_col = f"wnir_s_std_{r_str}_{suffix}"
+
+        # Заполняем count и std нулями
+        if count_col in df_group_primary.columns:
+            df_group_primary[count_col] = df_group_primary[count_col].fillna(0)
+        if std_col in df_group_primary.columns:
+            df_group_primary[std_col] = df_group_primary[std_col].fillna(0)
+
+        existing_price_cols = [
+            col for col in price_cols if col in df_group_primary.columns
+        ]
+        if not existing_price_cols:
+            continue
+
+        base_col = existing_price_cols[0]
+
+        # Маски для Nearest Neighbor
+        source_mask = (df_group_primary["set_type"] == "train") & (
+            df_group_primary[base_col].notna()
+        )
+        target_mask = (df_group_primary["set_type"].isin(["valid", "test"])) & (
+            df_group_primary[base_col].isna()
+        )
+
+        if source_mask.any() and target_mask.any():
+            source_idx = np.where(source_mask)[0]
+            target_idx = np.where(target_mask)[0]
+
+            source_coords = coords_tensor[source_idx]
+            target_coords = coords_tensor[target_idx]
+
+            with torch.no_grad():
+                # Указываем максимальное расстояние, например 10000 метров (10 км)
+                nearest_relative_indices, valid_mask = get_nearest_train_indices_gpu(
+                    target_coords,
+                    source_coords,
+                    max_distance_meters=fill_nearest_threshold,
+                    device=device,
+                )
+
+            # Оставляем только те точки valid/test, для которых нашелся БЛИЗКИЙ сосед
+            valid_mask_cpu = valid_mask.cpu().numpy()
+
+            # Фильтруем индексы Target (реципиентов) и Source (доноров)
+            target_idx_filtered = target_idx[valid_mask_cpu]
+            nearest_relative_indices_filtered = nearest_relative_indices.cpu().numpy()[
+                valid_mask_cpu
+            ]
+            nearest_absolute_indices = source_idx[nearest_relative_indices_filtered]
+
+            # Копируем фичи ТОЛЬКО для тех, кто прошел проверку по дистанции
+            if len(target_idx_filtered) > 0:
+                df_group_primary.loc[
+                    df_group_primary.index[target_idx_filtered], existing_price_cols
+                ] = df_group_primary.loc[
+                    df_group_primary.index[nearest_absolute_indices],
+                    existing_price_cols,
+                ].values
+
+        # Fallback: заполняем оставшиеся пропуски (в самом train) средним по train этого кластера
+        for col in existing_price_cols:
+            train_mean = df_group_primary[df_group_primary["set_type"] == "train"][
+                col
+            ].mean()
+            # Если train_mean = NaN (например в кластере вообще нет трейна), оставляем NaN или можно заполнить 0
+            df_group_primary[col] = df_group_primary[col].fillna(train_mean)
+
+    del coords_tensor
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    # Возвращаем только новые сгенерированные колонки, чтобы присоединить их к глобальному датафрейму
+    return df_group_primary[new_cols]
 
 
 def haversine_distance(
