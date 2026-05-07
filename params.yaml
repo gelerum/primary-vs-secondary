@@ -41,4 +41,4 @@ wnir:
   batch_size: 20000
 
 umap:
-  umap_n_components: 10
+  umap_n_components: 8
