@@ -67,19 +67,6 @@ stages:
       - data/interim/price_discount_valid.parquet
       - data/interim/price_discount_test.parquet
   
-  ksearch:
-    cmd: python -m src.stages.ksearch data/interim/umap_train.parquet
-    deps:
-      - data/interim/umap_train.parquet
-      - src/stages/ksearch.py
-    params:
-      - ksearch
-    outs:
-      - models/kmeans_preprocessor.joblib
-      - models/kmeans_model.joblib
-      - report/ksearch_metrics.json
-      - report/ksearch_plot.png
-
   wnir:
     cmd: python -m src.stages.wnir
     deps:
