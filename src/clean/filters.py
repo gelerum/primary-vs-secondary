@@ -49,7 +49,11 @@ def filter_by_price(df, price_min, price_max):
     df_filtered = df[(df["price"] >= price_min) & (df["price"] <= price_max)]
 
     # дополнительная фильтрация по 99-му перцентилю, чтобы отсеять выбросы
-    return df_filtered.quantile(0.99)
+    df_filtered = df_filtered[
+        df_filtered["price"] <= df_filtered["price"].quantile(0.99)
+    ]
+
+    return df_filtered
 
 
 def filter_by_build_year(df, min_value, max_value):
