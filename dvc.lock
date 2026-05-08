@@ -626,7 +626,7 @@ stages:
       nfiles: 3
     - path: src/stages/geocode.py
       hash: md5
-      md5: 7ec7e577ea3696aaa91844f207ed1ad3
+      md5: c9e26f85d7783e4fd4b950e776a7cbce
       size: 1255
     params:
       params.yaml:
@@ -983,3 +983,33 @@ stages:
       hash: md5
       md5: b970ba3317946887ebe8f09da83a2b67
       size: 13519599
+  validate_wnir_all:
+    cmd: "python -m src.stages.validate  --stage wnir_all  --inputs data/interim/wnir_all_train.parquet
+      data/interim/wnir_all_valid.parquet data/interim/wnir_all_test.parquet  --flag-file
+      data/reports/validate_wnir_all.done\n"
+    deps:
+    - path: data/interim/wnir_all_test.parquet
+      hash: md5
+      md5: 95308ba362a2b09978cfa2891df3efc8
+      size: 7876317
+    - path: data/interim/wnir_all_train.parquet
+      hash: md5
+      md5: 220ff8d4ed8f9c8a229ade57e72a0d67
+      size: 85250462
+    - path: data/interim/wnir_all_valid.parquet
+      hash: md5
+      md5: b970ba3317946887ebe8f09da83a2b67
+      size: 13519599
+    - path: src/stages/validate.py
+      hash: md5
+      md5: d1666e802e1938f806f9a2180d93234e
+      size: 1412
+    - path: src/validation/schemas.py
+      hash: md5
+      md5: ec597e2f70a843d63a8f4cf59a00f9b2
+      size: 3726
+    outs:
+    - path: data/reports/validate_wnir_all.done
+      hash: md5
+      md5: d41d8cd98f00b204e9800998ecf8427e
+      size: 0
