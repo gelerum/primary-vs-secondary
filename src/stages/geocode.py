@@ -1,8 +1,8 @@
 import pandas as pd
+from dvc.api import params_show
 
 from src.geocode.filters import filter_by_geo
 from src.geocode.geocoding import geocode_addresses
-from dvc.api import params_show
 
 
 def main():

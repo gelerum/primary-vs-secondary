@@ -81,3 +81,17 @@ stages:
       - data/interim/wnir_all_valid.parquet
       - data/interim/wnir_all_test.parquet
 
+  validate_wnir_all:
+    cmd: >
+      python -m src.stages.validate 
+      --stage wnir_all 
+      --inputs data/interim/wnir_all_train.parquet data/interim/wnir_all_valid.parquet data/interim/wnir_all_test.parquet 
+      --flag-file data/reports/validate_wnir_all.done
+    deps:
+      - src/stages/validate.py
+      - src/validation/schemas.py
+      - data/interim/wnir_all_train.parquet
+      - data/interim/wnir_all_valid.parquet
+      - data/interim/wnir_all_test.parquet
+    outs:
+      - data/reports/validate_wnir_all.done
