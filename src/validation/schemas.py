@@ -1,7 +1,8 @@
-import pandera as pa
-from pandera import Check, Column, DataFrameSchema
+import pandas as pd
+import pandera.pandas as pa
+from pandera.pandas import Check, Column, DataFrameSchema, Field
+from pandera.typing import DataFrame, Series
 
-# 1. Чтобы не писать 40 колонок руками, составим их список
 wnir_cols = [
     "wnir_p_value_100_all",
     "wnir_s_value_100_all",
@@ -45,47 +46,55 @@ wnir_cols = [
     "wnir_s_count_10000_all",
 ]
 
-# 2. Описываем базовые (не wnir) колонки со строгими типами
-columns = {
-    "longitude": Column(pa.Float32, nullable=False),
-    "latitude": Column(pa.Float32, nullable=False),
-    "area": Column(pa.Float32, nullable=False),
-    "room_count": Column(pa.UInt8, nullable=False),
-    "floor": Column(pa.Int16, nullable=False),
-    # Жесткая проверка: только primary или secondary
-    "market_type": Column(
-        pa.Category, Check.isin(["primary", "secondary"]), nullable=False
-    ),
-    "build_year": Column(pa.UInt16, nullable=False),
-    "date": Column(pa.DateTime, nullable=False),
-    "year": Column(pa.UInt16, nullable=False),
-    "month": Column(pa.UInt8, nullable=False),
-    "day": Column(pa.UInt8, nullable=False),
-    "administrative_district": Column(pa.Category, nullable=False),
-    "price_per_square_meter_normalized": Column(pa.Float32, nullable=False),
-    "price_normalized": Column(pa.Float32, nullable=False),
-}
 
-# 3. Добавляем wnir колонки в словарь columns.
-# nullable=True ОБЯЗАТЕЛЕН, так как в этих колонках физически будут NaN (для secondary).
-# А логику, ГДЕ ИМЕННО они могут быть, мы опишем ниже.
-for col in wnir_cols:
-    columns[col] = Column(pa.Float32, nullable=True)
+class WnirAllSchema(pa.DataFrameModel):
+    # 1. Базовые явные колонки
+    longitude: Series[pa.Float32] = Field(nullable=False)
+    latitude: Series[pa.Float32] = Field(nullable=False)
+    area: Series[pa.Float32] = Field(nullable=False)
+    room_count: Series[pa.UInt8] = Field(nullable=False)
+    floor: Series[pa.Int16] = Field(nullable=False)
 
-# 4. Собираем финальную строгую схему
-wnir_all_schema = DataFrameSchema(
-    columns=columns,
-    # Проверки на уровне всего датафрейма (условие на пересечение колонок)
-    checks=[
-        Check(
-            # Логика: Ячейка является NaN ТОГДА И ТОЛЬКО ТОГДА, когда market_type == "secondary".
-            # (Использование c=col нужно для правильного замыкания в цикле Python)
-            lambda df, c=col: df[c].isna() == (df["market_type"] == "secondary"),
-            name=f"strict_nan_logic_{col}",
-            error=f"Ошибка логики: {col} должен быть NaN для secondary и НЕ NaN для primary!",
-        )
-        for col in wnir_cols
-    ],
-    # Строгое соответствие: если появится колонка, которой нет в списке выше — скрипт упадет
-    strict=True,
-)
+    market_type: Series[pa.Category] = Field(
+        isin=["primary", "secondary"], nullable=False
+    )
+
+    build_year: Series[pa.UInt16] = Field(nullable=False)
+    date: Series[pa.DateTime] = Field(nullable=False)
+    year: Series[pa.UInt16] = Field(nullable=False)
+    month: Series[pa.UInt8] = Field(nullable=False)
+    day: Series[pa.UInt8] = Field(nullable=False)
+    administrative_district: Series[pa.Category] = Field(nullable=False)
+    price_per_square_meter_normalized: Series[pa.Float32] = Field(nullable=False)
+    price_normalized: Series[pa.Float32] = Field(nullable=False)
+
+    # 2. Групповое объявление 40 колонок wnir через регулярное выражение!
+    # Это заменяет ваш цикл for columns[col] = ...
+    wnir_features: Series[pa.Float32] = Field(
+        alias="^wnir_.*_all$", regex=True, nullable=True
+    )
+
+    class Config:
+        strict = True  # Запрещает любые незадекларированные колонки
+
+    # 3. Единая, явная и векторизованная проверка логики NaN
+    @pa.dataframe_check(name="strict_nan_logic")
+    def check_wnir_nan_logic(cls, df: DataFrame) -> DataFrame:
+        # Маска: True, если secondary
+        is_secondary = df["market_type"] == "secondary"
+
+        # Векторизованная проверка только для 40 колонок (размер N x 40)
+        wnir_df = df[wnir_cols]
+        wnir_check = wnir_df.isna().eq(is_secondary, axis=0)
+
+        # ИСПРАВЛЕНИЕ: Pandera требует, чтобы размер возвращаемого DataFrame
+        # совпадал с входным df. Создаем матрицу из True для всех колонок...
+        result = pd.DataFrame(True, index=df.index, columns=df.columns)
+
+        # ...и перезаписываем результаты только для наших 40 колонок
+        result[wnir_cols] = wnir_check
+
+        return result
+
+
+wnir_all_schema = WnirAllSchema.to_schema()

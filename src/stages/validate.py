@@ -3,9 +3,8 @@ import logging
 from pathlib import Path
 
 import pandas as pd
-import src.validation.schemas as schemas
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+import src.validation.schemas as schemas
 
 
 def main():
@@ -23,7 +22,6 @@ def main():
 
     # 2. Проверяем каждый переданный файл
     for path in args.inputs:
-        logging.info(f"Проверка {path} по схеме {schema_name}...")
         df = pd.read_parquet(path)
 
         # Строгая валидация (если что-то не так, скрипт выбросит ошибку и DVC остановится)
@@ -32,7 +30,6 @@ def main():
     # 3. Если всё прошло успешно, создаем пустой файл для DVC
     Path(args.flag_file).parent.mkdir(parents=True, exist_ok=True)
     Path(args.flag_file).touch()
-    logging.info(f"✅ Этап {args.stage} прошел строгую валидацию.")
 
 
 if __name__ == "__main__":
