@@ -27,7 +27,6 @@ from src.wnir.wnir import calculate_and_impute_wnir
 # ==========================================
 TARGET = "price_normalized"
 
-# Признаки (wnir_* колонки будут добавляться динамически в зависимости от пайплайна)
 BASE_NUM_FEATURES = [
     "area",
     "room_count",
@@ -46,15 +45,12 @@ print(f"Using device: {DEVICE}")
 # 1. RIDGE РЕГРЕССИЯ (VRAM-optimized, PyTorch)
 # ==========================================
 class TorchRidge:
-    """Оптимизированная L2-регрессия для работы с видеопамятью и большими данными"""
-
     def __init__(self, alpha=1.0, device="cuda"):
         self.alpha = alpha
         self.device = device
         self.w = None
 
     def fit(self, X, y):
-        # Строго float32 для экономии памяти
         X_t = torch.tensor(X, dtype=torch.float32, device=self.device)
         y_t = torch.tensor(y, dtype=torch.float32, device=self.device).view(-1, 1)
 
@@ -63,15 +59,16 @@ class TorchRidge:
 
         D = X_t.shape[1]
         I = torch.eye(D, dtype=torch.float32, device=self.device)
-        I[0, 0] = 0.0  # Не штрафуем смещение (Intercept)
+        I[0, 0] = 0.0
 
         A = X_t.T @ X_t + self.alpha * I
         b = X_t.T @ y_t
 
-        # lstsq (Least Squares) устойчив к вырожденным (сингулярным) матрицам
         self.w = torch.linalg.lstsq(A, b).solution
 
-        # Очистка VRAM
+        # ЗАЩИТА: Если из-за float32 математика выдала NaN, зануляем эти веса
+        self.w = torch.nan_to_num(self.w, nan=0.0, posinf=0.0, neginf=0.0)
+
         del X_t, y_t, ones, I, A, b
         torch.cuda.empty_cache()
 
@@ -82,7 +79,6 @@ class TorchRidge:
 
         preds = X_t @ self.w
 
-        # Переносим результат на CPU, чтобы не засорять видеокарту массивами предсказаний
         res = preds.cpu().numpy().flatten()
         del X_t, ones, preds
         torch.cuda.empty_cache()
@@ -93,9 +89,8 @@ class TorchRidge:
 # 2. ПОДГОТОВКА ДАННЫХ
 # ==========================================
 def get_preprocessor():
-    """Создает ColumnTransformer для базовых признаков"""
+    """Создает ColumnTransformer (без Imputer, т.к. пропусков нет)"""
     numeric_transformer = StandardScaler()
-    # ВАЖНО: drop="first" защищает от Dummy Variable Trap (мультиколлинеарности)
     categorical_transformer = OneHotEncoder(
         handle_unknown="ignore", drop="first", sparse_output=False
     )
@@ -109,7 +104,6 @@ def get_preprocessor():
 
 
 def load_data():
-    """Загрузка данных DVC и приведение к нужному формату"""
     print("Loading prepared DVC data (up to 1.5M rows)...")
     df_train = pd.read_parquet("data/interim/wnir_all_train.parquet").sample(25_000)
     df_valid = pd.read_parquet("data/interim/wnir_all_valid.parquet").sample(10_000)
@@ -125,14 +119,10 @@ def load_data():
 # ==========================================
 # 3. ЦЕЛЕВЫЕ ФУНКЦИИ OPTUNA
 # ==========================================
-
-
 def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
-    """Целевая функция для глобальных моделей (Без кластеризации)"""
     train_p = df_train[df_train["market_type"] == "primary"].copy()
     valid_p = df_valid[df_valid["market_type"] == "primary"].copy()
 
-    # Принудительно приводим к float32 для экономии памяти
     X_train_base = preprocessor.fit_transform(train_p).astype(np.float32)
     X_valid_base = preprocessor.transform(valid_p).astype(np.float32)
 
@@ -142,14 +132,12 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
     metrics = {}
 
     if exp_type == 1:
-        # Эксперимент 1: Базовая модель
         alpha = trial.suggest_float("ridge_alpha", 1e-3, 1e3, log=True)
         model = TorchRidge(alpha=alpha, device=DEVICE)
         model.fit(X_train_base, y_train)
         preds = model.predict(X_valid_base)
 
     elif exp_type == 2:
-        # Эксперимент 2: Предиктор-Корректор
         R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
         alpha1 = trial.suggest_float("ridge_alpha1", 1e-3, 1e3, log=True)
         alpha2 = trial.suggest_float("ridge_alpha2", 1e-3, 1e3, log=True)
@@ -158,7 +146,6 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
         y_train_proxy = train_p[proxy_col].fillna(0).values.astype(np.float32)
         y_valid_proxy = valid_p[proxy_col].fillna(0).values.astype(np.float32)
 
-        # Шаг 1: Предсказываем Proxy WNIR
         model1 = TorchRidge(alpha=alpha1, device=DEVICE)
         model1.fit(X_train_base, y_train_proxy)
         pred_proxy_tr = model1.predict(X_train_base).reshape(-1, 1)
@@ -168,7 +155,6 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
             np.sqrt(mean_squared_error(y_valid_proxy, pred_proxy_va))
         )
 
-        # Шаг 2: Предсказываем Цену
         X_train_step2 = np.hstack([X_train_base, pred_proxy_tr])
         X_valid_step2 = np.hstack([X_valid_base, pred_proxy_va])
 
@@ -176,13 +162,11 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
         model2.fit(X_train_step2, y_train)
         preds = model2.predict(X_valid_step2)
 
-    # Основные метрики для цены
     metrics["valid_rmse"] = float(np.sqrt(mean_squared_error(y_valid, preds)))
     metrics["valid_mae"] = float(mean_absolute_error(y_valid, preds))
     metrics["valid_mape"] = float(mean_absolute_percentage_error(y_valid, preds))
     metrics["valid_r2"] = float(r2_score(y_valid, preds))
 
-    # Очистка ОЗУ
     del train_p, valid_p, X_train_base, X_valid_base
     gc.collect()
 
@@ -190,15 +174,14 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
 
 
 def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_params):
-    """Целевая функция для кластерных моделей"""
+    global_mean_price = df_train[df_train["market_type"] == "primary"][TARGET].mean()
 
-    # 1. Подготовка фичей для кластеризации (строго без цены и WNIR) + float32
+    # Фичи для кластеризации строго без price и wnir
     X_train_all = preprocessor.fit_transform(df_train).astype(np.float32)
     X_valid_all = preprocessor.transform(df_valid).astype(np.float32)
 
     n_clusters = trial.suggest_int("n_clusters", 3, 20)
 
-    # Кластеризация на видеокарте
     kmeans = TorchKMeans(
         n_clusters=n_clusters, mode="euclidean", verbose=0, max_iter=100
     )
@@ -208,11 +191,9 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
     df_train["cluster"] = kmeans.fit_predict(X_tr_t).cpu().numpy()
     df_valid["cluster"] = kmeans.predict(X_va_t).cpu().numpy()
 
-    # Быстрая очистка VRAM от тяжелых тензоров кластеризации
     del X_tr_t, X_va_t, X_train_all, X_valid_all, kmeans
     torch.cuda.empty_cache()
 
-    # 2. Инициализация глобальных векторов для сбора предсказаний
     mask_valid_primary = df_valid["market_type"] == "primary"
     len_valid_p = mask_valid_primary.sum()
 
@@ -223,7 +204,6 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
         valid_proxy_preds = np.zeros(len_valid_p, dtype=np.float32)
         valid_proxy_true = np.zeros(len_valid_p, dtype=np.float32)
 
-    # Запрашиваем параметры регрессии у Optuna
     alpha1 = trial.suggest_float("ridge_alpha1", 1e-3, 1e3, log=True)
     if exp_type in [4, 5.2]:
         alpha2 = trial.suggest_float("ridge_alpha2", 1e-3, 1e3, log=True)
@@ -231,12 +211,10 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
 
     valid_idx_offset = 0
 
-    # 3. Итерация по кластерам
     for c in range(n_clusters):
         c_train_all = df_train[df_train["cluster"] == c].copy()
         c_valid_all = df_valid[df_valid["cluster"] == c].copy()
 
-        # ЭКСПЕРИМЕНТ 5: Внутрикластерный расчет WNIR
         if exp_type in [5.1, 5.2]:
             c_combined = (
                 pd.concat([c_train_all, c_valid_all])
@@ -261,7 +239,6 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
             gc.collect()
             torch.cuda.empty_cache()
 
-        # Фильтруем данные кластера до Primary (для обучения цены)
         c_train_p = c_train_all[c_train_all["market_type"] == "primary"]
         c_valid_p = c_valid_all[c_valid_all["market_type"] == "primary"]
 
@@ -269,23 +246,15 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
         idx_end = valid_idx_offset + len(c_valid_p)
         valid_idx_offset = idx_end
 
-        # Обработка пустых или микро-кластеров (защита от краша)
         if len(c_train_p) < 5 or len(c_valid_p) == 0:
             if len(c_valid_p) > 0:
-                mean_price = (
-                    c_train_p[TARGET].mean()
-                    if len(c_train_p) > 0
-                    else df_train[TARGET].mean()
-                )
-                valid_preds[idx_start:idx_end] = mean_price
+                valid_preds[idx_start:idx_end] = global_mean_price
             continue
 
-        # Приводим к float32 матрицы признаков внутри кластера
         X_tr_base = preprocessor.transform(c_train_p).astype(np.float32)
         X_va_base = preprocessor.transform(c_valid_p).astype(np.float32)
         y_tr = c_train_p[TARGET].values.astype(np.float32)
 
-        # Формирование матриц признаков (Base + WNIR features)
         if exp_type == 3:
             X_tr, X_va = X_tr_base, X_va_base
 
@@ -321,15 +290,12 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
                 [X_va_base, c_valid_p[all_wnir].fillna(0).values.astype(np.float32)]
             )
 
-        # Обучение
         if exp_type in [3, 5.1]:
-            # Прямое предсказание цены
             model = TorchRidge(alpha=alpha1, device=DEVICE)
             model.fit(X_tr, y_tr)
             valid_preds[idx_start:idx_end] = model.predict(X_va)
 
         elif exp_type in [4, 5.2]:
-            # Предиктор-Корректор
             suffix = "all" if exp_type == 4 else "cluster"
             proxy_col = f"wnir_p_value_{R}_{suffix}"
 
@@ -351,11 +317,9 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
             model2.fit(X_tr_step2, y_tr)
             valid_preds[idx_start:idx_end] = model2.predict(X_va_step2)
 
-        # Локальная очистка кластера
         del X_tr, X_va, c_train_p, c_valid_p, c_train_all, c_valid_all
         gc.collect()
 
-    # 4. Сборка финальных глобальных метрик (со всех кластеров)
     metrics = {
         "valid_rmse": float(np.sqrt(mean_squared_error(valid_true, valid_preds))),
         "valid_mae": float(mean_absolute_error(valid_true, valid_preds)),
@@ -382,7 +346,6 @@ def run_experiment(
     study = optuna.create_study(direction="minimize", study_name=exp_name)
 
     def objective(trial):
-        # Nested Run: логирует каждый подбор гиперпараметров внутрь родительского эксперимента
         with mlflow.start_run(nested=True, run_name=f"Trial_{trial.number}"):
             mlflow.log_param("exp_type", exp_type)
 
@@ -395,12 +358,9 @@ def run_experiment(
                     trial, df_train, df_valid, preprocessor, exp_type, wnir_params
                 )
 
-            # Логируем гиперпараметры
             mlflow.log_params(trial.params)
-            # Логируем ВСЕ метрики (RMSE, MAE, MAPE, R2, Proxy_RMSE)
             mlflow.log_metrics(metrics_dict)
 
-            # Глобальная очистка между триалами
             gc.collect()
             torch.cuda.empty_cache()
 
@@ -414,11 +374,9 @@ def run_experiment(
 # 5. ТОЧКА ВХОДА
 # ==========================================
 if __name__ == "__main__":
-    # Установка локальной базы данных SQLite для избежания предупреждений и конфликтов
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
     mlflow.set_experiment("Real_Estate_Pricing_Pipelines")
 
-    # Чтение параметров DVC для функции WNIR
     try:
         wnir_params = params_show()["wnir"]
     except Exception as e:
@@ -430,11 +388,9 @@ if __name__ == "__main__":
             "batch_size": 20000,
         }
 
-    # Подготовка
     df_train, df_valid = load_data()
     preprocessor = get_preprocessor()
 
-    # Описание дерева экспериментов
     experiments = [
         ("Exp_1_Global_Baseline", 1),
         ("Exp_2_Global_Corrector", 2),
@@ -444,9 +400,7 @@ if __name__ == "__main__":
         ("Exp_5.2_Cluster_Corrector_MacroMicro", 5.2),
     ]
 
-    # Запуск
     for exp_name, exp_type in experiments:
-        # Parent Run для группировки
         with mlflow.start_run(run_name=exp_name):
             run_experiment(
                 exp_name=exp_name,
@@ -455,10 +409,8 @@ if __name__ == "__main__":
                 df_valid=df_valid,
                 preprocessor=preprocessor,
                 wnir_params=wnir_params,
-                n_trials=10,  # <--- Измените это число для управления длительностью поиска
+                n_trials=15,
             )
 
     print("\nAll experiments finished!")
-    print(
-        "Run 'mlflow ui --backend-store-uri sqlite:///mlflow.db' in terminal to view the dashboard."
-    )
+    print("Run 'mlflow ui --backend-store-uri sqlite:///mlflow.db' to view dashboard.")
