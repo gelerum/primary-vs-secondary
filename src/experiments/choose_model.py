@@ -8,7 +8,7 @@ import pandas as pd
 import torch
 from dvc.api import params_show
 
-# Импорт кластеризации на PyTorch (pip install fast-pytorch-kmeans)
+# Импорт кластеризации на PyTorch
 from fast_pytorch_kmeans import KMeans as TorchKMeans
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
@@ -68,7 +68,8 @@ class TorchRidge:
         A = X_t.T @ X_t + self.alpha * I
         b = X_t.T @ y_t
 
-        self.w = torch.linalg.solve(A, b)
+        # lstsq (Least Squares) устойчив к вырожденным (сингулярным) матрицам
+        self.w = torch.linalg.lstsq(A, b).solution
 
         # Очистка VRAM
         del X_t, y_t, ones, I, A, b
@@ -94,8 +95,9 @@ class TorchRidge:
 def get_preprocessor():
     """Создает ColumnTransformer для базовых признаков"""
     numeric_transformer = StandardScaler()
+    # ВАЖНО: drop="first" защищает от Dummy Variable Trap (мультиколлинеарности)
     categorical_transformer = OneHotEncoder(
-        handle_unknown="ignore", sparse_output=False, dtype=np.float32
+        handle_unknown="ignore", drop="first", sparse_output=False
     )
 
     return ColumnTransformer(
@@ -380,7 +382,7 @@ def run_experiment(
     study = optuna.create_study(direction="minimize", study_name=exp_name)
 
     def objective(trial):
-        # Nested Run создается только нами вручную, никакого конфликта
+        # Nested Run: логирует каждый подбор гиперпараметров внутрь родительского эксперимента
         with mlflow.start_run(nested=True, run_name=f"Trial_{trial.number}"):
             mlflow.log_param("exp_type", exp_type)
 
@@ -393,18 +395,17 @@ def run_experiment(
                     trial, df_train, df_valid, preprocessor, exp_type, wnir_params
                 )
 
-            # Логируем гиперпараметры, которые подобрала Optuna в этом триале
+            # Логируем гиперпараметры
             mlflow.log_params(trial.params)
-
-            # Логируем ВСЕ метрики
+            # Логируем ВСЕ метрики (RMSE, MAE, MAPE, R2, Proxy_RMSE)
             mlflow.log_metrics(metrics_dict)
 
+            # Глобальная очистка между триалами
             gc.collect()
             torch.cuda.empty_cache()
 
             return metrics_dict["valid_rmse"]
 
-    # Запускаем БЕЗ callbacks
     study.optimize(objective, n_trials=n_trials)
     print(f"[{exp_name}] Finished! Best RMSE: {study.best_value:.4f}")
 
@@ -413,7 +414,7 @@ def run_experiment(
 # 5. ТОЧКА ВХОДА
 # ==========================================
 if __name__ == "__main__":
-    # Настраиваем MLflow на использование локальной базы данных SQLite
+    # Установка локальной базы данных SQLite для избежания предупреждений и конфликтов
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
     mlflow.set_experiment("Real_Estate_Pricing_Pipelines")
 
@@ -445,6 +446,7 @@ if __name__ == "__main__":
 
     # Запуск
     for exp_name, exp_type in experiments:
+        # Parent Run для группировки
         with mlflow.start_run(run_name=exp_name):
             run_experiment(
                 exp_name=exp_name,
@@ -453,9 +455,10 @@ if __name__ == "__main__":
                 df_valid=df_valid,
                 preprocessor=preprocessor,
                 wnir_params=wnir_params,
-                n_trials=10,
+                n_trials=10,  # <--- Измените это число для управления длительностью поиска
             )
 
+    print("\nAll experiments finished!")
     print(
-        "\nAll experiments finished. Run 'mlflow ui --backend-store-uri sqlite:///mlflow.db' to view the dashboard."
+        "Run 'mlflow ui --backend-store-uri sqlite:///mlflow.db' in terminal to view the dashboard."
     )
