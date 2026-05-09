@@ -111,8 +111,8 @@ def get_preprocessor():
 def load_data():
     """Загрузка данных DVC и приведение к нужному формату"""
     print("Loading prepared DVC data (up to 1.5M rows)...")
-    df_train = pd.read_parquet("data/interim/wnir_all_train.parquet")
-    df_valid = pd.read_parquet("data/interim/wnir_all_valid.parquet")
+    df_train = pd.read_parquet("data/interim/wnir_all_train.parquet").sample(25_000)
+    df_valid = pd.read_parquet("data/interim/wnir_all_valid.parquet").sample(10_000)
 
     df_train["date"] = pd.to_datetime(df_train["date"])
     df_valid["date"] = pd.to_datetime(df_valid["date"])
