@@ -99,8 +99,8 @@ def get_preprocessor():
 
 
 def load_data():
-    df_train = pd.read_parquet("data/interim/wnir_all_train.parquet").sample(25_000)
-    df_valid = pd.read_parquet("data/interim/wnir_all_valid.parquet").sample(10_000)
+    df_train = pd.read_parquet("data/interim/wnir_all_train.parquet")
+    df_valid = pd.read_parquet("data/interim/wnir_all_valid.parquet")
     df_train["date"] = pd.to_datetime(df_train["date"])
     df_valid["date"] = pd.to_datetime(df_valid["date"])
     df_train["set_type"] = "train"
