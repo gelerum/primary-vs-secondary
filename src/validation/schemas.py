@@ -68,30 +68,22 @@ class WnirAllSchema(pa.DataFrameModel):
     price_per_square_meter_normalized: Series[pa.Float32] = Field(nullable=False)
     price_normalized: Series[pa.Float32] = Field(nullable=False)
 
-    # 2. Групповое объявление 40 колонок wnir через регулярное выражение!
-    # Это заменяет ваш цикл for columns[col] = ...
     wnir_features: Series[pa.Float32] = Field(
         alias="^wnir_.*_all$", regex=True, nullable=True
     )
 
     class Config:
-        strict = True  # Запрещает любые незадекларированные колонки
+        strict = True
 
-    # 3. Единая, явная и векторизованная проверка логики NaN
     @pa.dataframe_check(name="strict_nan_logic")
     def check_wnir_nan_logic(cls, df: DataFrame) -> DataFrame:
-        # Маска: True, если secondary
         is_secondary = df["market_type"] == "secondary"
 
-        # Векторизованная проверка только для 40 колонок (размер N x 40)
         wnir_df = df[wnir_cols]
         wnir_check = wnir_df.isna().eq(is_secondary, axis=0)
 
-        # ИСПРАВЛЕНИЕ: Pandera требует, чтобы размер возвращаемого DataFrame
-        # совпадал с входным df. Создаем матрицу из True для всех колонок...
         result = pd.DataFrame(True, index=df.index, columns=df.columns)
 
-        # ...и перезаписываем результаты только для наших 40 колонок
         result[wnir_cols] = wnir_check
 
         return result
