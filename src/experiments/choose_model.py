@@ -8,7 +8,7 @@ import pandas as pd
 import torch
 from dvc.api import params_show
 
-# Импорт кластеризации на PyTorch (убедись, что сделал pip install fast-pytorch-kmeans)
+# Импорт кластеризации на PyTorch (pip install fast-pytorch-kmeans)
 from fast_pytorch_kmeans import KMeans as TorchKMeans
 from optuna.integration.mlflow import MLflowCallback
 from sklearn.compose import ColumnTransformer
@@ -93,25 +93,26 @@ class TorchRidge:
 # 2. ПОДГОТОВКА ДАННЫХ
 # ==========================================
 def get_preprocessor():
-    """Создает ColumnTransformer, возвращающий float32 матрицы"""
+    """Создает ColumnTransformer для базовых признаков"""
     numeric_transformer = StandardScaler()
     categorical_transformer = OneHotEncoder(
         handle_unknown="ignore", sparse_output=False, dtype=np.float32
     )
+
+    # dtype убран из ColumnTransformer, приведение типов будет делаться через .astype()
     return ColumnTransformer(
         transformers=[
             ("num", numeric_transformer, BASE_NUM_FEATURES),
             ("cat", categorical_transformer, BASE_CAT_FEATURES),
-        ],
-        dtype=np.float32,
+        ]
     )
 
 
 def load_data():
     """Загрузка данных DVC и приведение к нужному формату"""
     print("Loading prepared DVC data (up to 1.5M rows)...")
-    df_train = pd.read_parquet("data/interim/wnir_all_train.parquet").sample(25_000)
-    df_valid = pd.read_parquet("data/interim/wnir_all_valid.parquet").sample(25_000)
+    df_train = pd.read_parquet("data/interim/wnir_all_train.parquet")
+    df_valid = pd.read_parquet("data/interim/wnir_all_valid.parquet")
 
     df_train["date"] = pd.to_datetime(df_train["date"])
     df_valid["date"] = pd.to_datetime(df_valid["date"])
@@ -131,8 +132,9 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
     train_p = df_train[df_train["market_type"] == "primary"].copy()
     valid_p = df_valid[df_valid["market_type"] == "primary"].copy()
 
-    X_train_base = preprocessor.fit_transform(train_p)
-    X_valid_base = preprocessor.transform(valid_p)
+    # Принудительно приводим к float32 для экономии памяти
+    X_train_base = preprocessor.fit_transform(train_p).astype(np.float32)
+    X_valid_base = preprocessor.transform(valid_p).astype(np.float32)
 
     y_train = train_p[TARGET].values.astype(np.float32)
     y_valid = valid_p[TARGET].values.astype(np.float32)
@@ -190,9 +192,9 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
 def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_params):
     """Целевая функция для кластерных моделей"""
 
-    # 1. Подготовка фичей для кластеризации (строго без цены и WNIR)
-    X_train_all = preprocessor.fit_transform(df_train)
-    X_valid_all = preprocessor.transform(df_valid)
+    # 1. Подготовка фичей для кластеризации (строго без цены и WNIR) + float32
+    X_train_all = preprocessor.fit_transform(df_train).astype(np.float32)
+    X_valid_all = preprocessor.transform(df_valid).astype(np.float32)
 
     n_clusters = trial.suggest_int("n_clusters", 3, 20)
 
@@ -278,8 +280,9 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
                 valid_preds[idx_start:idx_end] = mean_price
             continue
 
-        X_tr_base = preprocessor.transform(c_train_p)
-        X_va_base = preprocessor.transform(c_valid_p)
+        # Приводим к float32 матрицы признаков внутри кластера
+        X_tr_base = preprocessor.transform(c_train_p).astype(np.float32)
+        X_va_base = preprocessor.transform(c_valid_p).astype(np.float32)
         y_tr = c_train_p[TARGET].values.astype(np.float32)
 
         # Формирование матриц признаков (Base + WNIR features)
@@ -450,7 +453,7 @@ if __name__ == "__main__":
                 df_valid=df_valid,
                 preprocessor=preprocessor,
                 wnir_params=wnir_params,
-                n_trials=15,  # <--- Ограничьте для тестов до 3-5 (особенно для Эксп 5)
+                n_trials=10,  # <--- Измените это число для управления длительностью
             )
 
     print("\nAll experiments finished. Run 'mlflow ui' to view the dashboard.")
