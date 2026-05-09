@@ -188,15 +188,22 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
 
 def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_params):
     """
-    БЛОК 2 И 3: КЛАСТЕРНЫЕ И СУПЕР-МОДЕЛИ (2.1-2.4, 3.1-3.3)
+    БЛОК 2 И 3: Кластерные и Супер-модели (2.1-2.4, 3.1-3.3)
     """
+    # 1. Сбрасываем индексы сразу — теперь они строго от 0 до N
+    df_train = df_train.reset_index(drop=True).copy()
+    df_valid = df_valid.reset_index(drop=True).copy()
+
     global_mean_price = df_train[df_train["market_type"] == "primary"][TARGET].mean()
 
-    # Кластеризация
+    # =============================================
+    # 1. Кластеризация
+    # =============================================
     X_train_all = preprocessor.fit_transform(df_train).astype(np.float32)
     X_valid_all = preprocessor.transform(df_valid).astype(np.float32)
 
     n_clusters = trial.suggest_int("n_clusters", 3, 20)
+
     kmeans = TorchKMeans(
         n_clusters=n_clusters, mode="euclidean", verbose=0, max_iter=100
     )
@@ -208,34 +215,42 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
 
     del X_tr_t, X_va_t, X_train_all, X_valid_all, kmeans
     torch.cuda.empty_cache()
+    gc.collect()
 
-    mask_valid_p = df_valid["market_type"] == "primary"
-    valid_preds = np.zeros(mask_valid_p.sum(), dtype=np.float32)
-    valid_true = df_valid[mask_valid_p][TARGET].values.astype(np.float32)
+    # =============================================
+    # 2. Подготовка для валидации (ЧЕРЕЗ PANDAS SERIES)
+    # =============================================
+    # Сохраняем индексы "первички"
+    valid_p_idx = df_valid[df_valid["market_type"] == "primary"].index
+
+    # Массивы-пустышки с правильными индексами
+    valid_preds = pd.Series(index=valid_p_idx, dtype=np.float32)
 
     if exp_type in [2.3, 2.4, 3.2, 3.3]:
-        valid_proxy_preds = np.zeros(mask_valid_p.sum(), dtype=np.float32)
-        valid_proxy_true = np.zeros(mask_valid_p.sum(), dtype=np.float32)
+        valid_proxy_preds = pd.Series(index=valid_p_idx, dtype=np.float32)
+        valid_proxy_true = pd.Series(index=valid_p_idx, dtype=np.float32)
 
-    # Параметры Optuna
     alpha1 = trial.suggest_float("ridge_alpha1", 1e-3, 1e3, log=True)
     if exp_type in [2.3, 2.4, 3.2, 3.3]:
         alpha2 = trial.suggest_float("ridge_alpha2", 1e-3, 1e3, log=True)
         R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
 
-    valid_idx_offset = 0
-
+    # =============================================
+    # 3. Цикл по кластерам
+    # =============================================
     for c in range(n_clusters):
         c_train_all = df_train[df_train["cluster"] == c].copy()
         c_valid_all = df_valid[df_valid["cluster"] == c].copy()
 
-        # Пересчет WNIR_cluster ТОЛЬКО для Блока 3
+        # --- Пересчёт WNIR на уровне кластера (только для Блока 3) ---
         if exp_type in [3.1, 3.2, 3.3]:
-            c_combined = (
-                pd.concat([c_train_all, c_valid_all])
-                .sort_values("date")
-                .reset_index(drop=True)
-            )
+            # ВАЖНО: сохраняем оригинальные индексы перед объединением!
+            c_train_all["orig_idx"] = c_train_all.index
+            c_valid_all["orig_idx"] = c_valid_all.index
+
+            c_combined = pd.concat([c_train_all, c_valid_all], ignore_index=True)
+            c_combined = c_combined.sort_values("date").reset_index(drop=True)
+
             new_wnir_cluster = calculate_and_impute_wnir(
                 df_group=c_combined,
                 Rs=list(wnir_params["R"].values()),
@@ -245,48 +260,59 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
                 device=DEVICE,
                 fill_nearest_threshold=wnir_params["fill_nearest_threshold"],
             )
-            c_combined = c_combined.join(new_wnir_cluster)
-            c_train_all = c_combined[c_combined["set_type"] == "train"]
-            c_valid_all = c_combined[c_combined["set_type"] == "valid"]
+
+            new_wnir_cluster = new_wnir_cluster.reset_index(drop=True)
+            c_combined = pd.concat([c_combined, new_wnir_cluster], axis=1)
+
+            # Возвращаем оригинальные индексы!
+            c_train_all = c_combined[c_combined["set_type"] == "train"].set_index(
+                "orig_idx"
+            )
+            c_valid_all = c_combined[c_combined["set_type"] == "valid"].set_index(
+                "orig_idx"
+            )
+            c_train_all.index.name = None
+            c_valid_all.index.name = None
+
             del c_combined, new_wnir_cluster
             gc.collect()
 
+        # =============================================
+        # 4. Подготовка данных внутри кластера
+        # =============================================
         c_train_p = c_train_all[c_train_all["market_type"] == "primary"]
         c_valid_p = c_valid_all[c_valid_all["market_type"] == "primary"]
 
-        idx_start, idx_end = valid_idx_offset, valid_idx_offset + len(c_valid_p)
-        valid_idx_offset = idx_end
-
         if len(c_train_p) < 5 or len(c_valid_p) == 0:
             if len(c_valid_p) > 0:
-                valid_preds[idx_start:idx_end] = global_mean_price
+                # Запись по глобальному индексу
+                valid_preds.loc[c_valid_p.index] = global_mean_price
             continue
 
         X_tr_base = preprocessor.transform(c_train_p).astype(np.float32)
         X_va_base = preprocessor.transform(c_valid_p).astype(np.float32)
         y_tr = c_train_p[TARGET].values.astype(np.float32)
 
-        # Сборка фичей для Шага 1 в зависимости от эксперимента
+        # =============================================
+        # 5. Формирование фичей
+        # =============================================
         if exp_type in [2.1, 2.3]:
-            # БЕЗ wnir_s
             X_tr_step1, X_va_step1 = X_tr_base, X_va_base
 
         elif exp_type in [2.2, 2.4, 3.2]:
-            # С макро-wnir_s (но БЕЗ микро для 3.2)
-            s_all = [
+            s_cols = [
                 col
                 for col in c_train_p.columns
                 if col.startswith("wnir_s_") and col.endswith("_all")
             ]
             X_tr_step1 = np.hstack(
-                [X_tr_base, c_train_p[s_all].fillna(0).values.astype(np.float32)]
+                [X_tr_base, c_train_p[s_cols].fillna(0).values.astype(np.float32)]
             )
             X_va_step1 = np.hstack(
-                [X_va_base, c_valid_p[s_all].fillna(0).values.astype(np.float32)]
+                [X_va_base, c_valid_p[s_cols].fillna(0).values.astype(np.float32)]
             )
 
         elif exp_type in [3.1, 3.3]:
-            # С макро и микро wnir_s
             s_all = [
                 col
                 for col in c_train_p.columns
@@ -297,26 +323,28 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
                 for col in c_train_p.columns
                 if col.startswith("wnir_s_") and col.endswith("_cluster")
             ]
-            all_s_cols = s_all + s_cluster
             X_tr_step1 = np.hstack(
-                [X_tr_base, c_train_p[all_s_cols].fillna(0).values.astype(np.float32)]
+                [
+                    X_tr_base,
+                    c_train_p[s_all + s_cluster].fillna(0).values.astype(np.float32),
+                ]
             )
             X_va_step1 = np.hstack(
-                [X_va_base, c_valid_p[all_s_cols].fillna(0).values.astype(np.float32)]
+                [
+                    X_va_base,
+                    c_valid_p[s_all + s_cluster].fillna(0).values.astype(np.float32),
+                ]
             )
 
-        # ОБУЧЕНИЕ
+        # =============================================
+        # 6. Обучение моделей
+        # =============================================
         if exp_type in [2.1, 2.2, 3.1]:
-            # DIRECT
             model = TorchRidge(alpha=alpha1, device=DEVICE)
             model.fit(X_tr_step1, y_tr)
             cluster_preds = model.predict(X_va_step1)
-            valid_preds[idx_start:idx_end] = np.nan_to_num(
-                cluster_preds, nan=global_mean_price
-            )
 
-        elif exp_type in [2.3, 2.4, 3.2, 3.3]:
-            # CORRECTOR
+        else:
             suffix = "all" if exp_type in [2.3, 2.4] else "cluster"
             proxy_col = f"wnir_p_value_{R}_{suffix}"
 
@@ -328,35 +356,50 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
             pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
             pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
 
-            pred_proxy_tr = np.nan_to_num(pred_proxy_tr, nan=0.0)
-            pred_proxy_va = np.nan_to_num(pred_proxy_va, nan=0.0)
-
-            valid_proxy_preds[idx_start:idx_end] = pred_proxy_va.flatten()
-            valid_proxy_true[idx_start:idx_end] = y_va_proxy
-
             X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr])
             X_va_step2 = np.hstack([X_va_step1, pred_proxy_va])
 
             model2 = TorchRidge(alpha=alpha2, device=DEVICE)
             model2.fit(X_tr_step2, y_tr)
             cluster_preds = model2.predict(X_va_step2)
-            valid_preds[idx_start:idx_end] = np.nan_to_num(
-                cluster_preds, nan=global_mean_price
-            )
+
+            # ЗАПИСЬ ПО ИНДЕКСАМ (Прокси)
+            valid_proxy_preds.loc[c_valid_p.index] = pred_proxy_va.flatten()
+            valid_proxy_true.loc[c_valid_p.index] = y_va_proxy
+
+        # ЗАПИСЬ ПО ИНДЕКСАМ (Целевой таргет)
+        cluster_preds = np.nan_to_num(
+            cluster_preds,
+            nan=global_mean_price,
+            posinf=global_mean_price,
+            neginf=global_mean_price,
+        )
+        valid_preds.loc[c_valid_p.index] = cluster_preds
 
         del X_tr_step1, X_va_step1, c_train_p, c_valid_p
+        if "X_tr_step2" in locals():
+            del X_tr_step2, X_va_step2
         gc.collect()
 
+    # =============================================
+    # 7. Финальные метрики
+    # =============================================
+    # Берем true прямо из df_valid по тем же индексам, чтобы порядок совпал 1 к 1
+    y_true_final = df_valid.loc[valid_p_idx, TARGET].values.astype(np.float32)
+    y_pred_final = valid_preds.values
+
     metrics = {
-        "valid_rmse": float(np.sqrt(mean_squared_error(valid_true, valid_preds))),
-        "valid_mae": float(mean_absolute_error(valid_true, valid_preds)),
-        "valid_mape": float(mean_absolute_percentage_error(valid_true, valid_preds)),
-        "valid_r2": float(r2_score(valid_true, valid_preds)),
+        "valid_rmse": float(np.sqrt(mean_squared_error(y_true_final, y_pred_final))),
+        "valid_mae": float(mean_absolute_error(y_true_final, y_pred_final)),
+        "valid_mape": float(mean_absolute_percentage_error(y_true_final, y_pred_final)),
+        "valid_r2": float(r2_score(y_true_final, y_pred_final)),
     }
 
     if exp_type in [2.3, 2.4, 3.2, 3.3]:
         metrics["valid_proxy_rmse"] = float(
-            np.sqrt(mean_squared_error(valid_proxy_true, valid_proxy_preds))
+            np.sqrt(
+                mean_squared_error(valid_proxy_true.values, valid_proxy_preds.values)
+            )
         )
 
     return metrics
