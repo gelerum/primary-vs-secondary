@@ -26,7 +26,6 @@ from src.wnir.wnir import calculate_and_impute_wnir
 # 0. ГЛОБАЛЬНЫЕ НАСТРОЙКИ
 # ==========================================
 TARGET = "price_normalized"
-
 BASE_NUM_FEATURES = [
     "area",
     "room_count",
@@ -42,7 +41,7 @@ print(f"Using device: {DEVICE}")
 
 
 # ==========================================
-# 1. RIDGE РЕГРЕССИЯ (VRAM-optimized, PyTorch)
+# 1. RIDGE РЕГРЕССИЯ (GPU)
 # ==========================================
 class TorchRidge:
     def __init__(self, alpha=1.0, device="cuda"):
@@ -65,8 +64,6 @@ class TorchRidge:
         b = X_t.T @ y_t
 
         self.w = torch.linalg.lstsq(A, b).solution
-
-        # ЗАЩИТА: Если из-за float32 математика выдала NaN, зануляем эти веса
         self.w = torch.nan_to_num(self.w, nan=0.0, posinf=0.0, neginf=0.0)
 
         del X_t, y_t, ones, I, A, b
@@ -78,8 +75,8 @@ class TorchRidge:
         X_t = torch.cat([ones, X_t], dim=1)
 
         preds = X_t @ self.w
-
         res = preds.cpu().numpy().flatten()
+
         del X_t, ones, preds
         torch.cuda.empty_cache()
         return res
@@ -89,12 +86,10 @@ class TorchRidge:
 # 2. ПОДГОТОВКА ДАННЫХ
 # ==========================================
 def get_preprocessor():
-    """Создает ColumnTransformer (без Imputer, т.к. пропусков нет)"""
     numeric_transformer = StandardScaler()
     categorical_transformer = OneHotEncoder(
         handle_unknown="ignore", drop="first", sparse_output=False
     )
-
     return ColumnTransformer(
         transformers=[
             ("num", numeric_transformer, BASE_NUM_FEATURES),
@@ -104,13 +99,10 @@ def get_preprocessor():
 
 
 def load_data():
-    print("Loading prepared DVC data (up to 1.5M rows)...")
     df_train = pd.read_parquet("data/interim/wnir_all_train.parquet").sample(25_000)
     df_valid = pd.read_parquet("data/interim/wnir_all_valid.parquet").sample(10_000)
-
     df_train["date"] = pd.to_datetime(df_train["date"])
     df_valid["date"] = pd.to_datetime(df_valid["date"])
-
     df_train["set_type"] = "train"
     df_valid["set_type"] = "valid"
     return df_train, df_valid
@@ -120,6 +112,9 @@ def load_data():
 # 3. ЦЕЛЕВЫЕ ФУНКЦИИ OPTUNA
 # ==========================================
 def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
+    """
+    БЛОК 1: ГЛОБАЛЬНЫЕ МОДЕЛИ (1.1, 1.2, 1.3, 1.4)
+    """
     train_p = df_train[df_train["market_type"] == "primary"].copy()
     valid_p = df_valid[df_valid["market_type"] == "primary"].copy()
 
@@ -131,57 +126,77 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
 
     metrics = {}
 
-    if exp_type == 1:
-        alpha = trial.suggest_float("ridge_alpha", 1e-3, 1e3, log=True)
-        model = TorchRidge(alpha=alpha, device=DEVICE)
-        model.fit(X_train_base, y_train)
-        preds = model.predict(X_valid_base)
-
-    elif exp_type == 2:
-        R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
-        alpha1 = trial.suggest_float("ridge_alpha1", 1e-3, 1e3, log=True)
+    # Запрашиваем параметры
+    alpha1 = trial.suggest_float("ridge_alpha1", 1e-3, 1e3, log=True)
+    if exp_type in [1.3, 1.4]:
         alpha2 = trial.suggest_float("ridge_alpha2", 1e-3, 1e3, log=True)
+        R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
 
+    # Сборка фичей для Шага 1
+    if exp_type in [1.1, 1.3]:
+        # БЕЗ wnir_s
+        X_tr_step1, X_va_step1 = X_train_base, X_valid_base
+    else:  # 1.2, 1.4
+        # С wnir_s
+        s_cols = [
+            c for c in train_p.columns if c.startswith("wnir_s_") and c.endswith("_all")
+        ]
+        X_tr_s = train_p[s_cols].fillna(0).values.astype(np.float32)
+        X_va_s = valid_p[s_cols].fillna(0).values.astype(np.float32)
+        X_tr_step1 = np.hstack([X_train_base, X_tr_s])
+        X_va_step1 = np.hstack([X_valid_base, X_va_s])
+
+    # Обучение
+    if exp_type in [1.1, 1.2]:
+        # DIRECT
+        model = TorchRidge(alpha=alpha1, device=DEVICE)
+        model.fit(X_tr_step1, y_train)
+        preds = model.predict(X_va_step1)
+
+    elif exp_type in [1.3, 1.4]:
+        # CORRECTOR
         proxy_col = f"wnir_p_value_{R}_all"
         y_train_proxy = train_p[proxy_col].fillna(0).values.astype(np.float32)
         y_valid_proxy = valid_p[proxy_col].fillna(0).values.astype(np.float32)
 
         model1 = TorchRidge(alpha=alpha1, device=DEVICE)
-        model1.fit(X_train_base, y_train_proxy)
-        pred_proxy_tr = model1.predict(X_train_base).reshape(-1, 1)
-        pred_proxy_va = model1.predict(X_valid_base).reshape(-1, 1)
+        model1.fit(X_tr_step1, y_train_proxy)
+        pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
+        pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
 
         metrics["valid_proxy_rmse"] = float(
             np.sqrt(mean_squared_error(y_valid_proxy, pred_proxy_va))
         )
 
-        X_train_step2 = np.hstack([X_train_base, pred_proxy_tr])
-        X_valid_step2 = np.hstack([X_valid_base, pred_proxy_va])
+        X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr])
+        X_va_step2 = np.hstack([X_va_step1, pred_proxy_va])
 
         model2 = TorchRidge(alpha=alpha2, device=DEVICE)
-        model2.fit(X_train_step2, y_train)
-        preds = model2.predict(X_valid_step2)
+        model2.fit(X_tr_step2, y_train)
+        preds = model2.predict(X_va_step2)
 
     metrics["valid_rmse"] = float(np.sqrt(mean_squared_error(y_valid, preds)))
     metrics["valid_mae"] = float(mean_absolute_error(y_valid, preds))
     metrics["valid_mape"] = float(mean_absolute_percentage_error(y_valid, preds))
     metrics["valid_r2"] = float(r2_score(y_valid, preds))
 
-    del train_p, valid_p, X_train_base, X_valid_base
+    del train_p, valid_p, X_train_base, X_valid_base, X_tr_step1, X_va_step1
     gc.collect()
 
     return metrics
 
 
 def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_params):
+    """
+    БЛОК 2 И 3: КЛАСТЕРНЫЕ И СУПЕР-МОДЕЛИ (2.1-2.4, 3.1-3.3)
+    """
     global_mean_price = df_train[df_train["market_type"] == "primary"][TARGET].mean()
 
-    # Фичи для кластеризации строго без price и wnir
+    # Кластеризация
     X_train_all = preprocessor.fit_transform(df_train).astype(np.float32)
     X_valid_all = preprocessor.transform(df_valid).astype(np.float32)
 
     n_clusters = trial.suggest_int("n_clusters", 3, 20)
-
     kmeans = TorchKMeans(
         n_clusters=n_clusters, mode="euclidean", verbose=0, max_iter=100
     )
@@ -194,18 +209,17 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
     del X_tr_t, X_va_t, X_train_all, X_valid_all, kmeans
     torch.cuda.empty_cache()
 
-    mask_valid_primary = df_valid["market_type"] == "primary"
-    len_valid_p = mask_valid_primary.sum()
+    mask_valid_p = df_valid["market_type"] == "primary"
+    valid_preds = np.zeros(mask_valid_p.sum(), dtype=np.float32)
+    valid_true = df_valid[mask_valid_p][TARGET].values.astype(np.float32)
 
-    valid_preds = np.zeros(len_valid_p, dtype=np.float32)
-    valid_true = df_valid[mask_valid_primary][TARGET].values.astype(np.float32)
+    if exp_type in [2.3, 2.4, 3.2, 3.3]:
+        valid_proxy_preds = np.zeros(mask_valid_p.sum(), dtype=np.float32)
+        valid_proxy_true = np.zeros(mask_valid_p.sum(), dtype=np.float32)
 
-    if exp_type in [4, 5.2]:
-        valid_proxy_preds = np.zeros(len_valid_p, dtype=np.float32)
-        valid_proxy_true = np.zeros(len_valid_p, dtype=np.float32)
-
+    # Параметры Optuna
     alpha1 = trial.suggest_float("ridge_alpha1", 1e-3, 1e3, log=True)
-    if exp_type in [4, 5.2]:
+    if exp_type in [2.3, 2.4, 3.2, 3.3]:
         alpha2 = trial.suggest_float("ridge_alpha2", 1e-3, 1e3, log=True)
         R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
 
@@ -215,13 +229,13 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
         c_train_all = df_train[df_train["cluster"] == c].copy()
         c_valid_all = df_valid[df_valid["cluster"] == c].copy()
 
-        if exp_type in [5.1, 5.2]:
+        # Пересчет WNIR_cluster ТОЛЬКО для Блока 3
+        if exp_type in [3.1, 3.2, 3.3]:
             c_combined = (
                 pd.concat([c_train_all, c_valid_all])
                 .sort_values("date")
                 .reset_index(drop=True)
             )
-
             new_wnir_cluster = calculate_and_impute_wnir(
                 df_group=c_combined,
                 Rs=list(wnir_params["R"].values()),
@@ -234,16 +248,13 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
             c_combined = c_combined.join(new_wnir_cluster)
             c_train_all = c_combined[c_combined["set_type"] == "train"]
             c_valid_all = c_combined[c_combined["set_type"] == "valid"]
-
             del c_combined, new_wnir_cluster
             gc.collect()
-            torch.cuda.empty_cache()
 
         c_train_p = c_train_all[c_train_all["market_type"] == "primary"]
         c_valid_p = c_valid_all[c_valid_all["market_type"] == "primary"]
 
-        idx_start = valid_idx_offset
-        idx_end = valid_idx_offset + len(c_valid_p)
+        idx_start, idx_end = valid_idx_offset, valid_idx_offset + len(c_valid_p)
         valid_idx_offset = idx_end
 
         if len(c_train_p) < 5 or len(c_valid_p) == 0:
@@ -255,69 +266,85 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
         X_va_base = preprocessor.transform(c_valid_p).astype(np.float32)
         y_tr = c_train_p[TARGET].values.astype(np.float32)
 
-        if exp_type == 3:
-            X_tr, X_va = X_tr_base, X_va_base
+        # Сборка фичей для Шага 1 в зависимости от эксперимента
+        if exp_type in [2.1, 2.3]:
+            # БЕЗ wnir_s
+            X_tr_step1, X_va_step1 = X_tr_base, X_va_base
 
-        elif exp_type == 4:
-            wnir_cols = [
+        elif exp_type in [2.2, 2.4, 3.2]:
+            # С макро-wnir_s (но БЕЗ микро для 3.2)
+            s_all = [
                 col
                 for col in c_train_p.columns
-                if col.startswith("wnir_") and col.endswith("_all")
+                if col.startswith("wnir_s_") and col.endswith("_all")
             ]
-            X_tr = np.hstack(
-                [X_tr_base, c_train_p[wnir_cols].fillna(0).values.astype(np.float32)]
+            X_tr_step1 = np.hstack(
+                [X_tr_base, c_train_p[s_all].fillna(0).values.astype(np.float32)]
             )
-            X_va = np.hstack(
-                [X_va_base, c_valid_p[wnir_cols].fillna(0).values.astype(np.float32)]
+            X_va_step1 = np.hstack(
+                [X_va_base, c_valid_p[s_all].fillna(0).values.astype(np.float32)]
             )
 
-        elif exp_type in [5.1, 5.2]:
-            wnir_all = [
+        elif exp_type in [3.1, 3.3]:
+            # С макро и микро wnir_s
+            s_all = [
                 col
                 for col in c_train_p.columns
-                if col.startswith("wnir_") and col.endswith("_all")
+                if col.startswith("wnir_s_") and col.endswith("_all")
             ]
-            wnir_cluster = [
+            s_cluster = [
                 col
                 for col in c_train_p.columns
                 if col.startswith("wnir_s_") and col.endswith("_cluster")
             ]
-            all_wnir = wnir_all + wnir_cluster
-            X_tr = np.hstack(
-                [X_tr_base, c_train_p[all_wnir].fillna(0).values.astype(np.float32)]
+            all_s_cols = s_all + s_cluster
+            X_tr_step1 = np.hstack(
+                [X_tr_base, c_train_p[all_s_cols].fillna(0).values.astype(np.float32)]
             )
-            X_va = np.hstack(
-                [X_va_base, c_valid_p[all_wnir].fillna(0).values.astype(np.float32)]
+            X_va_step1 = np.hstack(
+                [X_va_base, c_valid_p[all_s_cols].fillna(0).values.astype(np.float32)]
             )
 
-        if exp_type in [3, 5.1]:
+        # ОБУЧЕНИЕ
+        if exp_type in [2.1, 2.2, 3.1]:
+            # DIRECT
             model = TorchRidge(alpha=alpha1, device=DEVICE)
-            model.fit(X_tr, y_tr)
-            valid_preds[idx_start:idx_end] = model.predict(X_va)
+            model.fit(X_tr_step1, y_tr)
+            cluster_preds = model.predict(X_va_step1)
+            valid_preds[idx_start:idx_end] = np.nan_to_num(
+                cluster_preds, nan=global_mean_price
+            )
 
-        elif exp_type in [4, 5.2]:
-            suffix = "all" if exp_type == 4 else "cluster"
+        elif exp_type in [2.3, 2.4, 3.2, 3.3]:
+            # CORRECTOR
+            suffix = "all" if exp_type in [2.3, 2.4] else "cluster"
             proxy_col = f"wnir_p_value_{R}_{suffix}"
 
             y_tr_proxy = c_train_p[proxy_col].fillna(0).values.astype(np.float32)
             y_va_proxy = c_valid_p[proxy_col].fillna(0).values.astype(np.float32)
 
             model1 = TorchRidge(alpha=alpha1, device=DEVICE)
-            model1.fit(X_tr, y_tr_proxy)
-            pred_proxy_tr = model1.predict(X_tr).reshape(-1, 1)
-            pred_proxy_va = model1.predict(X_va).reshape(-1, 1)
+            model1.fit(X_tr_step1, y_tr_proxy)
+            pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
+            pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
+
+            pred_proxy_tr = np.nan_to_num(pred_proxy_tr, nan=0.0)
+            pred_proxy_va = np.nan_to_num(pred_proxy_va, nan=0.0)
 
             valid_proxy_preds[idx_start:idx_end] = pred_proxy_va.flatten()
             valid_proxy_true[idx_start:idx_end] = y_va_proxy
 
-            X_tr_step2 = np.hstack([X_tr, pred_proxy_tr])
-            X_va_step2 = np.hstack([X_va, pred_proxy_va])
+            X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr])
+            X_va_step2 = np.hstack([X_va_step1, pred_proxy_va])
 
             model2 = TorchRidge(alpha=alpha2, device=DEVICE)
             model2.fit(X_tr_step2, y_tr)
-            valid_preds[idx_start:idx_end] = model2.predict(X_va_step2)
+            cluster_preds = model2.predict(X_va_step2)
+            valid_preds[idx_start:idx_end] = np.nan_to_num(
+                cluster_preds, nan=global_mean_price
+            )
 
-        del X_tr, X_va, c_train_p, c_valid_p, c_train_all, c_valid_all
+        del X_tr_step1, X_va_step1, c_train_p, c_valid_p
         gc.collect()
 
     metrics = {
@@ -327,7 +354,7 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
         "valid_r2": float(r2_score(valid_true, valid_preds)),
     }
 
-    if exp_type in [4, 5.2]:
+    if exp_type in [2.3, 2.4, 3.2, 3.3]:
         metrics["valid_proxy_rmse"] = float(
             np.sqrt(mean_squared_error(valid_proxy_true, valid_proxy_preds))
         )
@@ -349,7 +376,7 @@ def run_experiment(
         with mlflow.start_run(nested=True, run_name=f"Trial_{trial.number}"):
             mlflow.log_param("exp_type", exp_type)
 
-            if exp_type in [1, 2]:
+            if exp_type < 2.0:
                 metrics_dict = objective_global(
                     trial, df_train, df_valid, preprocessor, exp_type
                 )
@@ -391,13 +418,22 @@ if __name__ == "__main__":
     df_train, df_valid = load_data()
     preprocessor = get_preprocessor()
 
+    # ПОЛНАЯ МАТРИЦА ЭКСПЕРИМЕНТОВ (11 ШТУК)
     experiments = [
-        ("Exp_1_Global_Baseline", 1),
-        ("Exp_2_Global_Corrector", 2),
-        ("Exp_3_Cluster_Baseline", 3),
-        ("Exp_4_Cluster_Corrector_GlobalWNIR", 4),
-        ("Exp_5.1_Cluster_Direct_MacroMicro", 5.1),
-        ("Exp_5.2_Cluster_Corrector_MacroMicro", 5.2),
+        # БЛОК 1: Глобальные (Единый город)
+        ("1.1_Global_Direct_NO_wnir", 1.1),
+        ("1.2_Global_Direct_WITH_wnir", 1.2),
+        ("1.3_Global_Corrector_NO_wnir", 1.3),
+        ("1.4_Global_Corrector_WITH_wnir", 1.4),
+        # БЛОК 2: Кластерные (Макро-уровень)
+        ("2.1_Cluster_Direct_NO_wnir", 2.1),
+        ("2.2_Cluster_Direct_WITH_wnir", 2.2),
+        ("2.3_Cluster_Corrector_NO_wnir", 2.3),
+        ("2.4_Cluster_Corrector_WITH_wnir", 2.4),
+        # БЛОК 3: Супер-модели (Макро + Микро уровень)
+        ("3.1_Super_Direct_WITH_Micro", 3.1),
+        ("3.2_Super_Corrector_NO_Micro", 3.2),
+        ("3.3_Super_Corrector_WITH_Micro", 3.3),
     ]
 
     for exp_name, exp_type in experiments:
@@ -409,8 +445,10 @@ if __name__ == "__main__":
                 df_valid=df_valid,
                 preprocessor=preprocessor,
                 wnir_params=wnir_params,
-                n_trials=15,
+                n_trials=10,  # Измени для управления длительностью
             )
 
     print("\nAll experiments finished!")
-    print("Run 'mlflow ui --backend-store-uri sqlite:///mlflow.db' to view dashboard.")
+    print(
+        "Run 'mlflow ui --backend-store-uri sqlite:///mlflow.db' to view the dashboard."
+    )
