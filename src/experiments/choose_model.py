@@ -25,7 +25,7 @@ from src.wnir.wnir import calculate_and_impute_wnir
 # ==========================================
 # 0. ГЛОБАЛЬНЫЕ НАСТРОЙКИ
 # ==========================================
-TARGET = "price_normalized"
+TARGET = "price_per_square_meter_normalized"
 BASE_NUM_FEATURES = [
     "area",
     "room_count",
