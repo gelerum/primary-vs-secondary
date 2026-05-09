@@ -10,7 +10,6 @@ from dvc.api import params_show
 
 # Импорт кластеризации на PyTorch (pip install fast-pytorch-kmeans)
 from fast_pytorch_kmeans import KMeans as TorchKMeans
-from optuna.integration.mlflow import MLflowCallback
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import (
     mean_absolute_error,
@@ -379,10 +378,9 @@ def run_experiment(
     print(f"\n{'=' * 60}\nRunning: {exp_name}\n{'=' * 60}")
 
     study = optuna.create_study(direction="minimize", study_name=exp_name)
-    mlflow_cb = MLflowCallback(tracking_uri="mlruns", metric_name="valid_rmse")
 
     def objective(trial):
-        # Nested Run: логирует каждый подбор гиперпараметров внутрь родительского эксперимента
+        # Nested Run создается только нами вручную, никакого конфликта
         with mlflow.start_run(nested=True, run_name=f"Trial_{trial.number}"):
             mlflow.log_param("exp_type", exp_type)
 
@@ -395,16 +393,19 @@ def run_experiment(
                     trial, df_train, df_valid, preprocessor, exp_type, wnir_params
                 )
 
-            # Логируем ВСЕ метрики (RMSE, MAE, MAPE, R2, Proxy_RMSE)
+            # Логируем гиперпараметры, которые подобрала Optuna в этом триале
+            mlflow.log_params(trial.params)
+
+            # Логируем ВСЕ метрики
             mlflow.log_metrics(metrics_dict)
 
-            # Глобальная очистка между триалами
             gc.collect()
             torch.cuda.empty_cache()
 
             return metrics_dict["valid_rmse"]
 
-    study.optimize(objective, n_trials=n_trials, callbacks=[mlflow_cb])
+    # Запускаем БЕЗ callbacks
+    study.optimize(objective, n_trials=n_trials)
     print(f"[{exp_name}] Finished! Best RMSE: {study.best_value:.4f}")
 
 
@@ -412,7 +413,8 @@ def run_experiment(
 # 5. ТОЧКА ВХОДА
 # ==========================================
 if __name__ == "__main__":
-    # Установка имени проекта в MLflow
+    # Настраиваем MLflow на использование локальной базы данных SQLite
+    mlflow.set_tracking_uri("sqlite:///mlflow.db")
     mlflow.set_experiment("Real_Estate_Pricing_Pipelines")
 
     # Чтение параметров DVC для функции WNIR
@@ -443,7 +445,6 @@ if __name__ == "__main__":
 
     # Запуск
     for exp_name, exp_type in experiments:
-        # Parent Run для группировки
         with mlflow.start_run(run_name=exp_name):
             run_experiment(
                 exp_name=exp_name,
@@ -452,7 +453,9 @@ if __name__ == "__main__":
                 df_valid=df_valid,
                 preprocessor=preprocessor,
                 wnir_params=wnir_params,
-                n_trials=10,  # <--- Измените это число для управления длительностью
+                n_trials=10,
             )
 
-    print("\nAll experiments finished. Run 'mlflow ui' to view the dashboard.")
+    print(
+        "\nAll experiments finished. Run 'mlflow ui --backend-store-uri sqlite:///mlflow.db' to view the dashboard."
+    )
