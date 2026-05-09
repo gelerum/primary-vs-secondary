@@ -99,7 +99,6 @@ def get_preprocessor():
         handle_unknown="ignore", sparse_output=False, dtype=np.float32
     )
 
-    # dtype убран из ColumnTransformer, приведение типов будет делаться через .astype()
     return ColumnTransformer(
         transformers=[
             ("num", numeric_transformer, BASE_NUM_FEATURES),
@@ -164,8 +163,8 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
         pred_proxy_tr = model1.predict(X_train_base).reshape(-1, 1)
         pred_proxy_va = model1.predict(X_valid_base).reshape(-1, 1)
 
-        metrics["valid_proxy_rmse"] = mean_squared_error(
-            y_valid_proxy, pred_proxy_va, squared=False
+        metrics["valid_proxy_rmse"] = float(
+            np.sqrt(mean_squared_error(y_valid_proxy, pred_proxy_va))
         )
 
         # Шаг 2: Предсказываем Цену
@@ -177,10 +176,10 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
         preds = model2.predict(X_valid_step2)
 
     # Основные метрики для цены
-    metrics["valid_rmse"] = mean_squared_error(y_valid, preds, squared=False)
-    metrics["valid_mae"] = mean_absolute_error(y_valid, preds)
-    metrics["valid_mape"] = mean_absolute_percentage_error(y_valid, preds)
-    metrics["valid_r2"] = r2_score(y_valid, preds)
+    metrics["valid_rmse"] = float(np.sqrt(mean_squared_error(y_valid, preds)))
+    metrics["valid_mae"] = float(mean_absolute_error(y_valid, preds))
+    metrics["valid_mape"] = float(mean_absolute_percentage_error(y_valid, preds))
+    metrics["valid_r2"] = float(r2_score(y_valid, preds))
 
     # Очистка ОЗУ
     del train_p, valid_p, X_train_base, X_valid_base
@@ -223,7 +222,7 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
         valid_proxy_preds = np.zeros(len_valid_p, dtype=np.float32)
         valid_proxy_true = np.zeros(len_valid_p, dtype=np.float32)
 
-    # Запрашиваем параметры регрессии у Optuna (одинаковые гиперпараметры для всех кластеров)
+    # Запрашиваем параметры регрессии у Optuna
     alpha1 = trial.suggest_float("ridge_alpha1", 1e-3, 1e3, log=True)
     if exp_type in [4, 5.2]:
         alpha2 = trial.suggest_float("ridge_alpha2", 1e-3, 1e3, log=True)
@@ -357,15 +356,15 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
 
     # 4. Сборка финальных глобальных метрик (со всех кластеров)
     metrics = {
-        "valid_rmse": mean_squared_error(valid_true, valid_preds, squared=False),
-        "valid_mae": mean_absolute_error(valid_true, valid_preds),
-        "valid_mape": mean_absolute_percentage_error(valid_true, valid_preds),
-        "valid_r2": r2_score(valid_true, valid_preds),
+        "valid_rmse": float(np.sqrt(mean_squared_error(valid_true, valid_preds))),
+        "valid_mae": float(mean_absolute_error(valid_true, valid_preds)),
+        "valid_mape": float(mean_absolute_percentage_error(valid_true, valid_preds)),
+        "valid_r2": float(r2_score(valid_true, valid_preds)),
     }
 
     if exp_type in [4, 5.2]:
-        metrics["valid_proxy_rmse"] = mean_squared_error(
-            valid_proxy_true, valid_proxy_preds, squared=False
+        metrics["valid_proxy_rmse"] = float(
+            np.sqrt(mean_squared_error(valid_proxy_true, valid_proxy_preds))
         )
 
     return metrics
