@@ -1,11 +1,15 @@
 import gc
 import os
+import tempfile
 
 import mlflow
 import numpy as np
 import optuna
 import pandas as pd
 import torch
+
+# Импорт CatBoost
+from catboost import CatBoostRegressor
 from dvc.api import params_show
 
 # Импорт кластеризации на PyTorch
@@ -41,7 +45,7 @@ print(f"Using device: {DEVICE}")
 
 
 # ==========================================
-# 1. RIDGE РЕГРЕССИЯ (GPU)
+# 1. МОДЕЛИ (RIDGE И ВРАППЕРЫ)
 # ==========================================
 class TorchRidge:
     def __init__(self, alpha=1.0, device="cuda"):
@@ -81,9 +85,30 @@ class TorchRidge:
         torch.cuda.empty_cache()
         return res
 
+    @property
+    def feature_importances_(self):
+        # Исключаем bias (первый элемент) и берем абсолютные значения весов
+        return np.abs(self.w[1:].cpu().numpy().flatten())
+
+
+def get_model(trial, model_type, prefix="1"):
+    """Фабрика моделей для Optuna: выбирает Ridge или CatBoost"""
+    if model_type == "ridge":
+        alpha = trial.suggest_float(f"ridge_alpha{prefix}", 1e-3, 1e3, log=True)
+        return TorchRidge(alpha=alpha, device=DEVICE)
+    elif model_type == "catboost":
+        params = {
+            "iterations": trial.suggest_int(f"cb_iters{prefix}", 100, 500),
+            "depth": trial.suggest_int(f"cb_depth{prefix}", 4, 10),
+            "learning_rate": trial.suggest_float(f"cb_lr{prefix}", 1e-3, 0.3, log=True),
+            "verbose": 0,
+            "task_type": "GPU" if torch.cuda.is_available() else "CPU",
+        }
+        return CatBoostRegressor(**params)
+
 
 # ==========================================
-# 2. ПОДГОТОВКА ДАННЫХ
+# 2. ПОДГОТОВКА ДАННЫХ И ХЕЛПЕРЫ
 # ==========================================
 def get_preprocessor():
     numeric_transformer = StandardScaler()
@@ -108,10 +133,29 @@ def load_data():
     return df_train, df_valid
 
 
+def get_base_feature_names(preprocessor):
+    """Извлекает имена базовых признаков после препроцессинга."""
+    cat_cols = preprocessor.named_transformers_["cat"].get_feature_names_out(
+        BASE_CAT_FEATURES
+    )
+    return BASE_NUM_FEATURES + list(cat_cols)
+
+
+def log_fi_to_mlflow(importances, feature_names, filename):
+    """Сохраняет Feature Importance как CSV артефакт в MLflow."""
+    df = pd.DataFrame({"feature": feature_names, "importance": importances})
+    df = df.sort_values("importance", ascending=False)
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        df.to_csv(f.name, index=False)
+        mlflow.log_artifact(f.name, filename)
+    os.remove(f.name)
+
+
 # ==========================================
 # 3. ЦЕЛЕВЫЕ ФУНКЦИИ OPTUNA
 # ==========================================
-def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
+def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_type):
     """
     БЛОК 1: ГЛОБАЛЬНЫЕ МОДЕЛИ (1.1, 1.2, 1.3, 1.4)
     """
@@ -121,23 +165,21 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
     X_train_base = preprocessor.fit_transform(train_p).astype(np.float32)
     X_valid_base = preprocessor.transform(valid_p).astype(np.float32)
 
+    base_feat_names = get_base_feature_names(preprocessor)
+
     y_train = train_p[TARGET].values.astype(np.float32)
     y_valid = valid_p[TARGET].values.astype(np.float32)
 
     metrics = {}
 
-    # Запрашиваем параметры
-    alpha1 = trial.suggest_float("ridge_alpha1", 1e-3, 1e3, log=True)
     if exp_type in [1.3, 1.4]:
-        alpha2 = trial.suggest_float("ridge_alpha2", 1e-3, 1e3, log=True)
         R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
 
     # Сборка фичей для Шага 1
     if exp_type in [1.1, 1.3]:
-        # БЕЗ wnir_s
         X_tr_step1, X_va_step1 = X_train_base, X_valid_base
+        feat_names_step1 = base_feat_names.copy()
     else:  # 1.2, 1.4
-        # С wnir_s
         s_cols = [
             c for c in train_p.columns if c.startswith("wnir_s_") and c.endswith("_all")
         ]
@@ -145,13 +187,17 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
         X_va_s = valid_p[s_cols].fillna(0).values.astype(np.float32)
         X_tr_step1 = np.hstack([X_train_base, X_tr_s])
         X_va_step1 = np.hstack([X_valid_base, X_va_s])
+        feat_names_step1 = base_feat_names + s_cols
 
     # Обучение
     if exp_type in [1.1, 1.2]:
         # DIRECT
-        model = TorchRidge(alpha=alpha1, device=DEVICE)
+        model = get_model(trial, model_type, prefix="1")
         model.fit(X_tr_step1, y_train)
         preds = model.predict(X_va_step1)
+
+        # Логируем FI
+        log_fi_to_mlflow(model.feature_importances_, feat_names_step1, "fi_main.csv")
 
     elif exp_type in [1.3, 1.4]:
         # CORRECTOR
@@ -159,10 +205,13 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
         y_train_proxy = train_p[proxy_col].fillna(0).values.astype(np.float32)
         y_valid_proxy = valid_p[proxy_col].fillna(0).values.astype(np.float32)
 
-        model1 = TorchRidge(alpha=alpha1, device=DEVICE)
+        model1 = get_model(trial, model_type, prefix="1")
         model1.fit(X_tr_step1, y_train_proxy)
         pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
         pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
+
+        # Логируем Proxy FI
+        log_fi_to_mlflow(model1.feature_importances_, feat_names_step1, "fi_proxy.csv")
 
         metrics["valid_proxy_rmse"] = float(
             np.sqrt(mean_squared_error(y_valid_proxy, pred_proxy_va))
@@ -170,10 +219,14 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
 
         X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr])
         X_va_step2 = np.hstack([X_va_step1, pred_proxy_va])
+        feat_names_step2 = feat_names_step1 + ["proxy_prediction"]
 
-        model2 = TorchRidge(alpha=alpha2, device=DEVICE)
+        model2 = get_model(trial, model_type, prefix="2")
         model2.fit(X_tr_step2, y_train)
         preds = model2.predict(X_va_step2)
+
+        # Логируем Main FI
+        log_fi_to_mlflow(model2.feature_importances_, feat_names_step2, "fi_main.csv")
 
     metrics["valid_rmse"] = float(np.sqrt(mean_squared_error(y_valid, preds)))
     metrics["valid_mae"] = float(mean_absolute_error(y_valid, preds))
@@ -186,21 +239,21 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type):
     return metrics
 
 
-def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_params):
+def objective_cluster(
+    trial, df_train, df_valid, preprocessor, exp_type, wnir_params, model_type
+):
     """
     БЛОК 2 И 3: Кластерные и Супер-модели (2.1-2.4, 3.1-3.3)
     """
-    # 1. Сбрасываем индексы сразу — теперь они строго от 0 до N
     df_train = df_train.reset_index(drop=True).copy()
     df_valid = df_valid.reset_index(drop=True).copy()
 
     global_mean_price = df_train[df_train["market_type"] == "primary"][TARGET].mean()
 
-    # =============================================
     # 1. Кластеризация
-    # =============================================
     X_train_all = preprocessor.fit_transform(df_train).astype(np.float32)
     X_valid_all = preprocessor.transform(df_valid).astype(np.float32)
+    base_feat_names = get_base_feature_names(preprocessor)
 
     n_clusters = trial.suggest_int("n_clusters", 3, 20)
 
@@ -217,37 +270,30 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
     torch.cuda.empty_cache()
     gc.collect()
 
-    # =============================================
-    # 2. Подготовка для валидации (ЧЕРЕЗ PANDAS SERIES)
-    # =============================================
-    # Сохраняем индексы "первички"
+    # 2. Подготовка массивов для валидации
     valid_p_idx = df_valid[df_valid["market_type"] == "primary"].index
-
-    # Массивы-пустышки с правильными индексами
     valid_preds = pd.Series(index=valid_p_idx, dtype=np.float32)
 
     if exp_type in [2.3, 2.4, 3.2, 3.3]:
         valid_proxy_preds = pd.Series(index=valid_p_idx, dtype=np.float32)
         valid_proxy_true = pd.Series(index=valid_p_idx, dtype=np.float32)
-
-    alpha1 = trial.suggest_float("ridge_alpha1", 1e-3, 1e3, log=True)
-    if exp_type in [2.3, 2.4, 3.2, 3.3]:
-        alpha2 = trial.suggest_float("ridge_alpha2", 1e-3, 1e3, log=True)
         R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
 
-    # =============================================
+    # Аккумуляторы для FI
+    fi_accum_step1 = 0
+    fi_accum_step2 = 0
+    total_samples = 0
+    feat_names_step1 = None
+    feat_names_step2 = None
+
     # 3. Цикл по кластерам
-    # =============================================
     for c in range(n_clusters):
         c_train_all = df_train[df_train["cluster"] == c].copy()
         c_valid_all = df_valid[df_valid["cluster"] == c].copy()
 
-        # --- Пересчёт WNIR на уровне кластера (только для Блока 3) ---
         if exp_type in [3.1, 3.2, 3.3]:
-            # ВАЖНО: сохраняем оригинальные индексы перед объединением!
             c_train_all["orig_idx"] = c_train_all.index
             c_valid_all["orig_idx"] = c_valid_all.index
-
             c_combined = pd.concat([c_train_all, c_valid_all], ignore_index=True)
             c_combined = c_combined.sort_values("date").reset_index(drop=True)
 
@@ -264,7 +310,6 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
             new_wnir_cluster = new_wnir_cluster.reset_index(drop=True)
             c_combined = pd.concat([c_combined, new_wnir_cluster], axis=1)
 
-            # Возвращаем оригинальные индексы!
             c_train_all = c_combined[c_combined["set_type"] == "train"].set_index(
                 "orig_idx"
             )
@@ -273,19 +318,14 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
             )
             c_train_all.index.name = None
             c_valid_all.index.name = None
-
             del c_combined, new_wnir_cluster
-            gc.collect()
 
-        # =============================================
-        # 4. Подготовка данных внутри кластера
-        # =============================================
         c_train_p = c_train_all[c_train_all["market_type"] == "primary"]
         c_valid_p = c_valid_all[c_valid_all["market_type"] == "primary"]
+        n_p = len(c_train_p)
 
-        if len(c_train_p) < 5 or len(c_valid_p) == 0:
+        if n_p < 5 or len(c_valid_p) == 0:
             if len(c_valid_p) > 0:
-                # Запись по глобальному индексу
                 valid_preds.loc[c_valid_p.index] = global_mean_price
             continue
 
@@ -293,11 +333,11 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
         X_va_base = preprocessor.transform(c_valid_p).astype(np.float32)
         y_tr = c_train_p[TARGET].values.astype(np.float32)
 
-        # =============================================
-        # 5. Формирование фичей
-        # =============================================
+        # 4. Формирование фичей
         if exp_type in [2.1, 2.3]:
             X_tr_step1, X_va_step1 = X_tr_base, X_va_base
+            if feat_names_step1 is None:
+                feat_names_step1 = base_feat_names.copy()
 
         elif exp_type in [2.2, 2.4, 3.2]:
             s_cols = [
@@ -311,6 +351,8 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
             X_va_step1 = np.hstack(
                 [X_va_base, c_valid_p[s_cols].fillna(0).values.astype(np.float32)]
             )
+            if feat_names_step1 is None:
+                feat_names_step1 = base_feat_names + s_cols
 
         elif exp_type in [3.1, 3.3]:
             s_all = [
@@ -335,14 +377,18 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
                     c_valid_p[s_all + s_cluster].fillna(0).values.astype(np.float32),
                 ]
             )
+            if feat_names_step1 is None:
+                feat_names_step1 = base_feat_names + s_all + s_cluster
 
-        # =============================================
-        # 6. Обучение моделей
-        # =============================================
+        # 5. Обучение моделей
         if exp_type in [2.1, 2.2, 3.1]:
-            model = TorchRidge(alpha=alpha1, device=DEVICE)
+            model = get_model(trial, model_type, prefix="1")
             model.fit(X_tr_step1, y_tr)
             cluster_preds = model.predict(X_va_step1)
+
+            # Аккумуляция FI
+            fi_accum_step1 += model.feature_importances_ * n_p
+            total_samples += n_p
 
         else:
             suffix = "all" if exp_type in [2.3, 2.4] else "cluster"
@@ -351,23 +397,28 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
             y_tr_proxy = c_train_p[proxy_col].fillna(0).values.astype(np.float32)
             y_va_proxy = c_valid_p[proxy_col].fillna(0).values.astype(np.float32)
 
-            model1 = TorchRidge(alpha=alpha1, device=DEVICE)
+            model1 = get_model(trial, model_type, prefix="1")
             model1.fit(X_tr_step1, y_tr_proxy)
             pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
             pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
 
             X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr])
             X_va_step2 = np.hstack([X_va_step1, pred_proxy_va])
+            if feat_names_step2 is None:
+                feat_names_step2 = feat_names_step1 + ["proxy_prediction"]
 
-            model2 = TorchRidge(alpha=alpha2, device=DEVICE)
+            model2 = get_model(trial, model_type, prefix="2")
             model2.fit(X_tr_step2, y_tr)
             cluster_preds = model2.predict(X_va_step2)
 
-            # ЗАПИСЬ ПО ИНДЕКСАМ (Прокси)
             valid_proxy_preds.loc[c_valid_p.index] = pred_proxy_va.flatten()
             valid_proxy_true.loc[c_valid_p.index] = y_va_proxy
 
-        # ЗАПИСЬ ПО ИНДЕКСАМ (Целевой таргет)
+            # Аккумуляция FI
+            fi_accum_step1 += model1.feature_importances_ * n_p
+            fi_accum_step2 += model2.feature_importances_ * n_p
+            total_samples += n_p
+
         cluster_preds = np.nan_to_num(
             cluster_preds,
             nan=global_mean_price,
@@ -376,15 +427,18 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
         )
         valid_preds.loc[c_valid_p.index] = cluster_preds
 
-        del X_tr_step1, X_va_step1, c_train_p, c_valid_p
-        if "X_tr_step2" in locals():
-            del X_tr_step2, X_va_step2
-        gc.collect()
+    # 6. Усреднение и логирование FI
+    if total_samples > 0:
+        if exp_type in [2.1, 2.2, 3.1]:
+            avg_fi_main = fi_accum_step1 / total_samples
+            log_fi_to_mlflow(avg_fi_main, feat_names_step1, "fi_main.csv")
+        else:
+            avg_fi_proxy = fi_accum_step1 / total_samples
+            avg_fi_main = fi_accum_step2 / total_samples
+            log_fi_to_mlflow(avg_fi_proxy, feat_names_step1, "fi_proxy.csv")
+            log_fi_to_mlflow(avg_fi_main, feat_names_step2, "fi_main.csv")
 
-    # =============================================
     # 7. Финальные метрики
-    # =============================================
-    # Берем true прямо из df_valid по тем же индексам, чтобы порядок совпал 1 к 1
     y_true_final = df_valid.loc[valid_p_idx, TARGET].values.astype(np.float32)
     y_pred_final = valid_preds.values
 
@@ -409,23 +463,41 @@ def objective_cluster(trial, df_train, df_valid, preprocessor, exp_type, wnir_pa
 # 4. ДВИЖОК ЭКСПЕРИМЕНТОВ
 # ==========================================
 def run_experiment(
-    exp_name, exp_type, df_train, df_valid, preprocessor, wnir_params, n_trials=20
+    exp_name,
+    exp_type,
+    model_type,
+    df_train,
+    df_valid,
+    preprocessor,
+    wnir_params,
+    n_trials=20,
 ):
-    print(f"\n{'=' * 60}\nRunning: {exp_name}\n{'=' * 60}")
+    print(
+        f"\n{'=' * 60}\nRunning: {exp_name} | Model: {model_type.upper()}\n{'=' * 60}"
+    )
 
-    study = optuna.create_study(direction="minimize", study_name=exp_name)
+    study = optuna.create_study(
+        direction="minimize", study_name=f"{exp_name}_{model_type}"
+    )
 
     def objective(trial):
         with mlflow.start_run(nested=True, run_name=f"Trial_{trial.number}"):
             mlflow.log_param("exp_type", exp_type)
+            mlflow.log_param("model_type", model_type)
 
             if exp_type < 2.0:
                 metrics_dict = objective_global(
-                    trial, df_train, df_valid, preprocessor, exp_type
+                    trial, df_train, df_valid, preprocessor, exp_type, model_type
                 )
             else:
                 metrics_dict = objective_cluster(
-                    trial, df_train, df_valid, preprocessor, exp_type, wnir_params
+                    trial,
+                    df_train,
+                    df_valid,
+                    preprocessor,
+                    exp_type,
+                    wnir_params,
+                    model_type,
                 )
 
             mlflow.log_params(trial.params)
@@ -437,7 +509,9 @@ def run_experiment(
             return metrics_dict["valid_rmse"]
 
     study.optimize(objective, n_trials=n_trials)
-    print(f"[{exp_name}] Finished! Best RMSE: {study.best_value:.4f}")
+    print(
+        f"[{exp_name} - {model_type.upper()}] Finished! Best RMSE: {study.best_value:.4f}"
+    )
 
 
 # ==========================================
@@ -463,33 +537,35 @@ if __name__ == "__main__":
 
     # ПОЛНАЯ МАТРИЦА ЭКСПЕРИМЕНТОВ (11 ШТУК)
     experiments = [
-        # БЛОК 1: Глобальные (Единый город)
         ("1.1_Global_Direct_NO_wnir", 1.1),
         ("1.2_Global_Direct_WITH_wnir", 1.2),
         ("1.3_Global_Corrector_NO_wnir", 1.3),
         ("1.4_Global_Corrector_WITH_wnir", 1.4),
-        # БЛОК 2: Кластерные (Макро-уровень)
         ("2.1_Cluster_Direct_NO_wnir", 2.1),
         ("2.2_Cluster_Direct_WITH_wnir", 2.2),
         ("2.3_Cluster_Corrector_NO_wnir", 2.3),
         ("2.4_Cluster_Corrector_WITH_wnir", 2.4),
-        # БЛОК 3: Супер-модели (Макро + Микро уровень)
         ("3.1_Super_Direct_WITH_Micro", 3.1),
         ("3.2_Super_Corrector_NO_Micro", 3.2),
         ("3.3_Super_Corrector_WITH_Micro", 3.3),
     ]
 
+    # Итерация и по экспериментам, и по моделям
     for exp_name, exp_type in experiments:
-        with mlflow.start_run(run_name=exp_name):
-            run_experiment(
-                exp_name=exp_name,
-                exp_type=exp_type,
-                df_train=df_train,
-                df_valid=df_valid,
-                preprocessor=preprocessor,
-                wnir_params=wnir_params,
-                n_trials=10,  # Измени для управления длительностью
-            )
+        for model_type in ["ridge", "catboost"]:
+            full_exp_name = f"{exp_name}_{model_type.upper()}"
+
+            with mlflow.start_run(run_name=full_exp_name):
+                run_experiment(
+                    exp_name=exp_name,
+                    exp_type=exp_type,
+                    model_type=model_type,
+                    df_train=df_train,
+                    df_valid=df_valid,
+                    preprocessor=preprocessor,
+                    wnir_params=wnir_params,
+                    n_trials=10,  # Оставил 10, но для кэтбуста мб стоит уменьшить время
+                )
 
     print("\nAll experiments finished!")
     print(
