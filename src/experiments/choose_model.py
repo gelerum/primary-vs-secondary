@@ -491,7 +491,33 @@ def run_experiment(
     )
 
     study_name = f"{exp_name}_{model_type}_{cluster_algo}"
-    study = optuna.create_study(direction="minimize", study_name=study_name)
+
+    # === ИЗМЕНЕНИЯ ЗДЕСЬ ===
+    # Указываем БД для Optuna. Можно использовать ту же, что и у MLflow,
+    # но лучше создать отдельную (optuna.db), чтобы не смешивать таблицы.
+    optuna_db_path = "sqlite:///optuna.db"
+
+    study = optuna.create_study(
+        direction="minimize",
+        study_name=study_name,
+        storage=optuna_db_path,  # Сохраняем прогресс на диск
+        load_if_exists=True,  # Загружаем, если уже есть
+    )
+
+    # Считаем, сколько успешных попыток уже есть в базе
+    completed_trials = len(
+        [t for t in study.trials if t.state.name in ["COMPLETE", "PRUNED"]]
+    )
+    trials_to_run = max(0, n_trials - completed_trials)
+
+    if trials_to_run == 0:
+        print(f"[{study_name}] Already completed {n_trials} trials. Skipping...")
+        return  # Если уже отработали, просто пропускаем этот эксперимент
+
+    print(
+        f"[{study_name}] Found {completed_trials} completed trials. Running {trials_to_run} more..."
+    )
+    # =======================
 
     def objective(trial):
         with mlflow.start_run(nested=True, run_name=f"Trial_{trial.number}"):
@@ -523,7 +549,8 @@ def run_experiment(
 
             return metrics_dict["valid_rmse"]
 
-    study.optimize(objective, n_trials=n_trials)
+    # Запускаем только недостающее количество попыток
+    study.optimize(objective, n_trials=trials_to_run)
     print(f"[{study_name}] Finished! Best RMSE: {study.best_value:.4f}")
 
 
