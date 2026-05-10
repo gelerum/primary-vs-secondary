@@ -2,6 +2,7 @@ import gc
 import os
 import tempfile
 
+import hdbscan  # ДОБАВЛЕНО: импорт HDBSCAN
 import mlflow
 import numpy as np
 import optuna
@@ -87,12 +88,10 @@ class TorchRidge:
 
     @property
     def feature_importances_(self):
-        # Исключаем bias (первый элемент) и берем абсолютные значения весов
         return np.abs(self.w[1:].cpu().numpy().flatten())
 
 
 def get_model(trial, model_type, prefix="1"):
-    """Фабрика моделей для Optuna: выбирает Ridge или CatBoost"""
     if model_type == "ridge":
         alpha = trial.suggest_float(f"ridge_alpha{prefix}", 1e-3, 1e3, log=True)
         return TorchRidge(alpha=alpha, device=DEVICE)
@@ -134,7 +133,6 @@ def load_data():
 
 
 def get_base_feature_names(preprocessor):
-    """Извлекает имена базовых признаков после препроцессинга."""
     cat_cols = preprocessor.named_transformers_["cat"].get_feature_names_out(
         BASE_CAT_FEATURES
     )
@@ -142,7 +140,6 @@ def get_base_feature_names(preprocessor):
 
 
 def log_fi_to_mlflow(importances, feature_names, filename):
-    """Сохраняет Feature Importance как CSV артефакт в MLflow."""
     df = pd.DataFrame({"feature": feature_names, "importance": importances})
     df = df.sort_values("importance", ascending=False)
 
@@ -156,9 +153,6 @@ def log_fi_to_mlflow(importances, feature_names, filename):
 # 3. ЦЕЛЕВЫЕ ФУНКЦИИ OPTUNA
 # ==========================================
 def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_type):
-    """
-    БЛОК 1: ГЛОБАЛЬНЫЕ МОДЕЛИ (1.1, 1.2, 1.3, 1.4)
-    """
     train_p = df_train[df_train["market_type"] == "primary"].copy()
     valid_p = df_valid[df_valid["market_type"] == "primary"].copy()
 
@@ -175,7 +169,6 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_ty
     if exp_type in [1.3, 1.4]:
         R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
 
-    # Сборка фичей для Шага 1
     if exp_type in [1.1, 1.3]:
         X_tr_step1, X_va_step1 = X_train_base, X_valid_base
         feat_names_step1 = base_feat_names.copy()
@@ -189,18 +182,13 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_ty
         X_va_step1 = np.hstack([X_valid_base, X_va_s])
         feat_names_step1 = base_feat_names + s_cols
 
-    # Обучение
     if exp_type in [1.1, 1.2]:
-        # DIRECT
         model = get_model(trial, model_type, prefix="1")
         model.fit(X_tr_step1, y_train)
         preds = model.predict(X_va_step1)
-
-        # Логируем FI
         log_fi_to_mlflow(model.feature_importances_, feat_names_step1, "fi_main.csv")
 
     elif exp_type in [1.3, 1.4]:
-        # CORRECTOR
         proxy_col = f"wnir_p_value_{R}_all"
         y_train_proxy = train_p[proxy_col].fillna(0).values.astype(np.float32)
         y_valid_proxy = valid_p[proxy_col].fillna(0).values.astype(np.float32)
@@ -210,7 +198,6 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_ty
         pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
         pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
 
-        # Логируем Proxy FI
         log_fi_to_mlflow(model1.feature_importances_, feat_names_step1, "fi_proxy.csv")
 
         metrics["valid_proxy_rmse"] = float(
@@ -225,7 +212,6 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_ty
         model2.fit(X_tr_step2, y_train)
         preds = model2.predict(X_va_step2)
 
-        # Логируем Main FI
         log_fi_to_mlflow(model2.feature_importances_, feat_names_step2, "fi_main.csv")
 
     metrics["valid_rmse"] = float(np.sqrt(mean_squared_error(y_valid, preds)))
@@ -240,35 +226,64 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_ty
 
 
 def objective_cluster(
-    trial, df_train, df_valid, preprocessor, exp_type, wnir_params, model_type
+    trial,
+    df_train,
+    df_valid,
+    preprocessor,
+    exp_type,
+    wnir_params,
+    model_type,
+    cluster_algo,
 ):
-    """
-    БЛОК 2 И 3: Кластерные и Супер-модели (2.1-2.4, 3.1-3.3)
-    """
     df_train = df_train.reset_index(drop=True).copy()
     df_valid = df_valid.reset_index(drop=True).copy()
 
     global_mean_price = df_train[df_train["market_type"] == "primary"][TARGET].mean()
 
-    # 1. Кластеризация
+    # 1. Кластеризация (ИЗМЕНЕНО ДЛЯ ПОДДЕРЖКИ HDBSCAN)
     X_train_all = preprocessor.fit_transform(df_train).astype(np.float32)
     X_valid_all = preprocessor.transform(df_valid).astype(np.float32)
     base_feat_names = get_base_feature_names(preprocessor)
 
-    n_clusters = trial.suggest_int("n_clusters", 3, 20)
+    if cluster_algo == "kmeans":
+        n_clusters = trial.suggest_int("n_clusters", 3, 20)
+        kmeans = TorchKMeans(
+            n_clusters=n_clusters, mode="euclidean", verbose=0, max_iter=100
+        )
+        X_tr_t = torch.tensor(X_train_all, dtype=torch.float32, device=DEVICE)
+        X_va_t = torch.tensor(X_valid_all, dtype=torch.float32, device=DEVICE)
 
-    kmeans = TorchKMeans(
-        n_clusters=n_clusters, mode="euclidean", verbose=0, max_iter=100
-    )
-    X_tr_t = torch.tensor(X_train_all, dtype=torch.float32, device=DEVICE)
-    X_va_t = torch.tensor(X_valid_all, dtype=torch.float32, device=DEVICE)
+        df_train["cluster"] = kmeans.fit_predict(X_tr_t).cpu().numpy()
+        df_valid["cluster"] = kmeans.predict(X_va_t).cpu().numpy()
 
-    df_train["cluster"] = kmeans.fit_predict(X_tr_t).cpu().numpy()
-    df_valid["cluster"] = kmeans.predict(X_va_t).cpu().numpy()
+        del X_tr_t, X_va_t, kmeans
+        torch.cuda.empty_cache()
 
-    del X_tr_t, X_va_t, X_train_all, X_valid_all, kmeans
-    torch.cuda.empty_cache()
+    elif cluster_algo == "hdbscan":
+        min_cluster_size = trial.suggest_int("hdb_min_cluster_size", 15, 300)
+        min_samples = trial.suggest_int("hdb_min_samples", 5, 50)
+
+        # prediction_data=True обязательно для approximate_predict
+        clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=min_cluster_size,
+            min_samples=min_samples,
+            prediction_data=True,
+            core_dist_n_jobs=-1,
+        )
+        # Обучаем и предсказываем на train
+        df_train["cluster"] = clusterer.fit_predict(X_train_all)
+
+        # Инференс для valid с использованием approximate_predict
+        labels, _ = hdbscan.approximate_predict(clusterer, X_valid_all)
+        df_valid["cluster"] = labels
+
+        del clusterer
+
+    del X_train_all, X_valid_all
     gc.collect()
+
+    # Получаем уникальные кластеры (актуально для HDBSCAN, так как может быть разное кол-во и кластер "-1")
+    unique_clusters = sorted(df_train["cluster"].unique())
 
     # 2. Подготовка массивов для валидации
     valid_p_idx = df_valid[df_valid["market_type"] == "primary"].index
@@ -279,15 +294,14 @@ def objective_cluster(
         valid_proxy_true = pd.Series(index=valid_p_idx, dtype=np.float32)
         R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
 
-    # Аккумуляторы для FI
     fi_accum_step1 = 0
     fi_accum_step2 = 0
     total_samples = 0
     feat_names_step1 = None
     feat_names_step2 = None
 
-    # 3. Цикл по кластерам
-    for c in range(n_clusters):
+    # 3. Цикл по уникальным кластерам
+    for c in unique_clusters:
         c_train_all = df_train[df_train["cluster"] == c].copy()
         c_valid_all = df_valid[df_valid["cluster"] == c].copy()
 
@@ -324,6 +338,7 @@ def objective_cluster(
         c_valid_p = c_valid_all[c_valid_all["market_type"] == "primary"]
         n_p = len(c_train_p)
 
+        # Если в кластере мало данных, заполняем средним
         if n_p < 5 or len(c_valid_p) == 0:
             if len(c_valid_p) > 0:
                 valid_preds.loc[c_valid_p.index] = global_mean_price
@@ -386,7 +401,6 @@ def objective_cluster(
             model.fit(X_tr_step1, y_tr)
             cluster_preds = model.predict(X_va_step1)
 
-            # Аккумуляция FI
             fi_accum_step1 += model.feature_importances_ * n_p
             total_samples += n_p
 
@@ -414,7 +428,6 @@ def objective_cluster(
             valid_proxy_preds.loc[c_valid_p.index] = pred_proxy_va.flatten()
             valid_proxy_true.loc[c_valid_p.index] = y_va_proxy
 
-            # Аккумуляция FI
             fi_accum_step1 += model1.feature_importances_ * n_p
             fi_accum_step2 += model2.feature_importances_ * n_p
             total_samples += n_p
@@ -470,20 +483,21 @@ def run_experiment(
     df_valid,
     preprocessor,
     wnir_params,
+    cluster_algo="none",
     n_trials=20,
 ):
     print(
-        f"\n{'=' * 60}\nRunning: {exp_name} | Model: {model_type.upper()}\n{'=' * 60}"
+        f"\n{'=' * 60}\nRunning: {exp_name} | Model: {model_type.upper()} | Clustering: {cluster_algo.upper()}\n{'=' * 60}"
     )
 
-    study = optuna.create_study(
-        direction="minimize", study_name=f"{exp_name}_{model_type}"
-    )
+    study_name = f"{exp_name}_{model_type}_{cluster_algo}"
+    study = optuna.create_study(direction="minimize", study_name=study_name)
 
     def objective(trial):
         with mlflow.start_run(nested=True, run_name=f"Trial_{trial.number}"):
             mlflow.log_param("exp_type", exp_type)
             mlflow.log_param("model_type", model_type)
+            mlflow.log_param("cluster_algo", cluster_algo)
 
             if exp_type < 2.0:
                 metrics_dict = objective_global(
@@ -498,6 +512,7 @@ def run_experiment(
                     exp_type,
                     wnir_params,
                     model_type,
+                    cluster_algo,
                 )
 
             mlflow.log_params(trial.params)
@@ -509,9 +524,7 @@ def run_experiment(
             return metrics_dict["valid_rmse"]
 
     study.optimize(objective, n_trials=n_trials)
-    print(
-        f"[{exp_name} - {model_type.upper()}] Finished! Best RMSE: {study.best_value:.4f}"
-    )
+    print(f"[{study_name}] Finished! Best RMSE: {study.best_value:.4f}")
 
 
 # ==========================================
@@ -550,22 +563,36 @@ if __name__ == "__main__":
         ("3.3_Super_Corrector_WITH_Micro", 3.3),
     ]
 
-    # Итерация и по экспериментам, и по моделям
+    # Итерация по экспериментам, моделям и типам кластеризации
     for exp_name, exp_type in experiments:
         for model_type in ["ridge", "catboost"]:
-            full_exp_name = f"{exp_name}_{model_type.upper()}"
+            # Для экспериментов 1.х кластеризация не нужна
+            if exp_type < 2.0:
+                cluster_algos = ["none"]
+            else:
+                # Для 2.x и 3.x проводим эксперименты с обоими алгоритмами
+                cluster_algos = ["kmeans", "hdbscan"]
 
-            with mlflow.start_run(run_name=full_exp_name):
-                run_experiment(
-                    exp_name=exp_name,
-                    exp_type=exp_type,
-                    model_type=model_type,
-                    df_train=df_train,
-                    df_valid=df_valid,
-                    preprocessor=preprocessor,
-                    wnir_params=wnir_params,
-                    n_trials=10,  # Оставил 10, но для кэтбуста мб стоит уменьшить время
-                )
+            for cluster_algo in cluster_algos:
+                if cluster_algo == "none":
+                    full_exp_name = f"{exp_name}_{model_type.upper()}"
+                else:
+                    full_exp_name = (
+                        f"{exp_name}_{model_type.upper()}_{cluster_algo.upper()}"
+                    )
+
+                with mlflow.start_run(run_name=full_exp_name):
+                    run_experiment(
+                        exp_name=exp_name,
+                        exp_type=exp_type,
+                        model_type=model_type,
+                        df_train=df_train,
+                        df_valid=df_valid,
+                        preprocessor=preprocessor,
+                        wnir_params=wnir_params,
+                        cluster_algo=cluster_algo,
+                        n_trials=10,
+                    )
 
     print("\nAll experiments finished!")
     print(
