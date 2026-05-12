@@ -409,11 +409,17 @@ def objective_cluster(
 
         # 5. Обучение моделей
         if exp_type in [2.1, 2.2, 3.1]:
-            model = get_model(trial, model_type, prefix="1")
-            model.fit(X_tr_step1, y_tr)
-            cluster_preds = model.predict(X_va_step1)
+            # Проверяем, не одинаковые ли все значения таргета
+            if np.all(y_tr == y_tr[0]):
+                cluster_preds = np.full(len(X_va_step1), y_tr[0], dtype=np.float32)
+                fi = np.zeros(X_tr_step1.shape[1], dtype=np.float32)
+            else:
+                model = get_model(trial, model_type, prefix="1")
+                model.fit(X_tr_step1, y_tr)
+                cluster_preds = model.predict(X_va_step1)
+                fi = model.feature_importances_
 
-            fi_accum_step1 += model.feature_importances_ * n_p
+            fi_accum_step1 += fi * n_p
             total_samples += n_p
 
         else:
@@ -423,19 +429,36 @@ def objective_cluster(
             y_tr_proxy = c_train_p[proxy_col].fillna(0).values.astype(np.float32)
             y_va_proxy = c_valid_p[proxy_col].fillna(0).values.astype(np.float32)
 
-            model1 = get_model(trial, model_type, prefix="1")
-            model1.fit(X_tr_step1, y_tr_proxy)
-            pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
-            pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
+            # --- МОДЕЛЬ 1 (PROXY) ---
+            if np.all(y_tr_proxy == y_tr_proxy[0]):
+                pred_proxy_tr = np.full(
+                    (len(X_tr_step1), 1), y_tr_proxy[0], dtype=np.float32
+                )
+                pred_proxy_va = np.full(
+                    (len(X_va_step1), 1), y_tr_proxy[0], dtype=np.float32
+                )
+                fi1 = np.zeros(X_tr_step1.shape[1], dtype=np.float32)
+            else:
+                model1 = get_model(trial, model_type, prefix="1")
+                model1.fit(X_tr_step1, y_tr_proxy)
+                pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
+                pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
+                fi1 = model1.feature_importances_
 
             X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr])
             X_va_step2 = np.hstack([X_va_step1, pred_proxy_va])
             if feat_names_step2 is None:
                 feat_names_step2 = feat_names_step1 + ["proxy_prediction"]
 
-            model2 = get_model(trial, model_type, prefix="2")
-            model2.fit(X_tr_step2, y_tr)
-            cluster_preds = model2.predict(X_va_step2)
+            # --- МОДЕЛЬ 2 (ОСНОВНАЯ) ---
+            if np.all(y_tr == y_tr[0]):
+                cluster_preds = np.full(len(X_va_step2), y_tr[0], dtype=np.float32)
+                fi2 = np.zeros(X_tr_step2.shape[1], dtype=np.float32)
+            else:
+                model2 = get_model(trial, model_type, prefix="2")
+                model2.fit(X_tr_step2, y_tr)
+                cluster_preds = model2.predict(X_va_step2)
+                fi2 = model2.feature_importances_
 
             # ==========================================
             # ИСПРАВЛЕНИЕ: строгое приведение типов (убирает FutureWarning)
@@ -446,8 +469,8 @@ def objective_cluster(
             valid_proxy_true.loc[c_valid_p.index] = y_va_proxy.astype(np.float32)
             # ==========================================
 
-            fi_accum_step1 += model1.feature_importances_ * n_p
-            fi_accum_step2 += model2.feature_importances_ * n_p
+            fi_accum_step1 += fi1 * n_p
+            fi_accum_step2 += fi2 * n_p
             total_samples += n_p
 
         cluster_preds = np.nan_to_num(
