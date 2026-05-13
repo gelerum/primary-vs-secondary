@@ -443,6 +443,15 @@ def objective_cluster(
                 model1.fit(X_tr_step1, y_tr_proxy)
                 pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
                 pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
+
+                # ИСПРАВЛЕНИЕ: Защита от бесконечностей (inf) для Ridge
+                pred_proxy_tr = np.nan_to_num(
+                    pred_proxy_tr, nan=0.0, posinf=0.0, neginf=0.0
+                )
+                pred_proxy_va = np.nan_to_num(
+                    pred_proxy_va, nan=0.0, posinf=0.0, neginf=0.0
+                )
+
                 fi1 = model1.feature_importances_
 
             X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr])
@@ -501,6 +510,20 @@ def objective_cluster(
     y_true_final = df_valid.loc[valid_p_idx, TARGET].values.astype(np.float32)
     y_pred_final = valid_preds.fillna(global_mean_price).values.astype(np.float32)
 
+    # ИСПРАВЛЕНИЕ: Глобальная очистка от inf перед расчетом метрик
+    y_true_final = np.nan_to_num(
+        y_true_final,
+        nan=global_mean_price,
+        posinf=global_mean_price,
+        neginf=global_mean_price,
+    )
+    y_pred_final = np.nan_to_num(
+        y_pred_final,
+        nan=global_mean_price,
+        posinf=global_mean_price,
+        neginf=global_mean_price,
+    )
+
     metrics = {
         "valid_rmse": float(np.sqrt(mean_squared_error(y_true_final, y_pred_final))),
         "valid_mae": float(mean_absolute_error(y_true_final, y_pred_final)),
@@ -511,6 +534,10 @@ def objective_cluster(
     if exp_type in [2.3, 2.4, 3.2, 3.3]:
         vp_true = valid_proxy_true.fillna(0.0).values.astype(np.float32)
         vp_preds = valid_proxy_preds.fillna(0.0).values.astype(np.float32)
+
+        # ИСПРАВЛЕНИЕ: Очистка от inf для прокси-таргета
+        vp_true = np.nan_to_num(vp_true, nan=0.0, posinf=0.0, neginf=0.0)
+        vp_preds = np.nan_to_num(vp_preds, nan=0.0, posinf=0.0, neginf=0.0)
 
         metrics["valid_proxy_rmse"] = float(
             np.sqrt(mean_squared_error(vp_true, vp_preds))
