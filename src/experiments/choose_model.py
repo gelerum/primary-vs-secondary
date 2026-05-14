@@ -1,6 +1,6 @@
 import gc
-import os
-import tempfile
+from dataclasses import dataclass
+from typing import Literal
 
 import hdbscan
 import mlflow
@@ -38,6 +38,59 @@ BASE_CAT_FEATURES = ["administrative_district"]
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {DEVICE}")
+
+
+# ==========================================
+# 0.5 КОНФИГ ЭКСПЕРИМЕНТА
+# ==========================================
+@dataclass(frozen=True)
+class ExpConfig:
+    """Orthogonal experiment axes — replaces float exp_type literals.
+
+    Feature-inclusion rules:
+      - scope='local' always feeds both global (s_*_all) and per-cluster (s_*_cluster)
+        WNIR features to the regressor.
+      - scope='global'|'clustered' only feeds s_*_all features when use_wnir=True.
+    """
+
+    scope: Literal["global", "clustered", "nested"]
+    mode: Literal["direct", "two_stage"]
+    use_wnir: bool = False  # controls s_*_all features for global/clustered; ignored for local
+
+    @property
+    def name(self) -> str:
+        base = f"{self.scope}_{self.mode}"
+        suffixes = []
+        if self.includes_wnir_all:
+            suffixes.append("+wnir_all")
+        if self.includes_wnir_cluster:
+            suffixes.append("+wnir_cluster")
+        return base + "".join(suffixes)
+
+    @property
+    def includes_wnir_all(self) -> bool:
+        return self.use_wnir or self.scope == "nested"
+
+    @property
+    def includes_wnir_cluster(self) -> bool:
+        return self.scope == "nested"
+
+    @property
+    def proxy_suffix(self) -> str:
+        # Maps to the WNIR data-column suffix, not the scope name.
+        return "cluster" if self.scope == "nested" else "all"
+
+    @property
+    def needs_per_cluster_wnir(self) -> bool:
+        return self.scope == "nested"
+
+    def tags(self) -> dict:
+        return {
+            "scope": self.scope,
+            "mode": self.mode,
+            "includes_wnir_all": str(self.includes_wnir_all),
+            "includes_wnir_cluster": str(self.includes_wnir_cluster),
+        }
 
 
 # ==========================================
@@ -86,10 +139,147 @@ class TorchRidge:
         return np.abs(self.w[1:].cpu().numpy().flatten())
 
 
+class TorchLinearRegression:
+    """GPU OLS via torch.linalg.lstsq."""
+
+    def __init__(self, device="cuda"):
+        self.device = device
+        self.w = None
+
+    def fit(self, X, y):
+        X_t = torch.tensor(X, dtype=torch.float32, device=self.device)
+        y_t = torch.tensor(y, dtype=torch.float32, device=self.device).view(-1, 1)
+
+        ones = torch.ones((X_t.shape[0], 1), dtype=torch.float32, device=self.device)
+        X_t = torch.cat([ones, X_t], dim=1)
+
+        self.w = torch.linalg.lstsq(X_t, y_t).solution
+        self.w = torch.nan_to_num(self.w, nan=0.0, posinf=0.0, neginf=0.0)
+
+        del X_t, y_t, ones
+        torch.cuda.empty_cache()
+
+    def predict(self, X):
+        X_t = torch.tensor(X, dtype=torch.float32, device=self.device)
+        ones = torch.ones((X_t.shape[0], 1), dtype=torch.float32, device=self.device)
+        X_t = torch.cat([ones, X_t], dim=1)
+
+        preds = X_t @ self.w
+        res = preds.cpu().numpy().flatten()
+
+        del X_t, ones, preds
+        torch.cuda.empty_cache()
+        return res
+
+    @property
+    def feature_importances_(self):
+        return np.abs(self.w[1:].cpu().numpy().flatten())
+
+
+class TorchElasticNet:
+    """GPU ElasticNet via FISTA. l1_ratio=1.0 -> Lasso, l1_ratio=0.0 -> Ridge-like (no closed form, still iterative)."""
+
+    def __init__(
+        self, alpha=1.0, l1_ratio=0.5, max_iter=1000, tol=1e-5, device="cuda"
+    ):
+        self.alpha = float(alpha)
+        self.l1_ratio = float(l1_ratio)
+        self.max_iter = int(max_iter)
+        self.tol = float(tol)
+        self.device = device
+        self.w = None
+        self.intercept = 0.0
+        self._x_mean = None
+
+    def fit(self, X, y):
+        X_t = torch.tensor(X, dtype=torch.float32, device=self.device)
+        y_t = torch.tensor(y, dtype=torch.float32, device=self.device)
+        n, d = X_t.shape
+
+        x_mean = X_t.mean(dim=0)
+        y_mean = y_t.mean()
+        Xc = X_t - x_mean
+        yc = y_t - y_mean
+
+        l1_pen = self.alpha * self.l1_ratio
+        l2_pen = self.alpha * (1.0 - self.l1_ratio)
+
+        # Spectral norm of (1/n) * Xc^T Xc via power iteration -> Lipschitz constant L
+        v = torch.randn(d, dtype=torch.float32, device=self.device)
+        v = v / (torch.norm(v) + 1e-12)
+        for _ in range(30):
+            Av = (Xc.T @ (Xc @ v)) / n
+            v = Av / (torch.norm(Av) + 1e-12)
+        sigma2 = float((v @ ((Xc.T @ (Xc @ v)) / n)).item())
+        L = sigma2 + l2_pen + 1e-6
+        step = 1.0 / L
+
+        w = torch.zeros(d, dtype=torch.float32, device=self.device)
+        z = w.clone()
+        t = 1.0
+        thresh = step * l1_pen
+
+        for _ in range(self.max_iter):
+            grad = (Xc.T @ (Xc @ z - yc)) / n + l2_pen * z
+            w_new = z - step * grad
+            if l1_pen > 0:
+                w_new = torch.sign(w_new) * torch.clamp(
+                    torch.abs(w_new) - thresh, min=0.0
+                )
+
+            t_new = 0.5 * (1.0 + (1.0 + 4.0 * t * t) ** 0.5)
+            z = w_new + ((t - 1.0) / t_new) * (w_new - w)
+
+            denom = torch.norm(w) + 1e-12
+            diff = torch.norm(w_new - w) / denom
+            w = w_new
+            t = t_new
+
+            if float(diff.item()) < self.tol:
+                break
+
+        w = torch.nan_to_num(w, nan=0.0, posinf=0.0, neginf=0.0)
+        self.w = w
+        self.intercept = float((y_mean - (x_mean * w).sum()).item())
+        self._x_mean = x_mean
+
+        del X_t, y_t, Xc, yc, v
+        torch.cuda.empty_cache()
+
+    def predict(self, X):
+        X_t = torch.tensor(X, dtype=torch.float32, device=self.device)
+        preds = X_t @ self.w + self.intercept
+        res = preds.cpu().numpy().flatten()
+        res = np.nan_to_num(res, nan=0.0, posinf=0.0, neginf=0.0)
+        del X_t, preds
+        torch.cuda.empty_cache()
+        return res
+
+    @property
+    def feature_importances_(self):
+        return np.abs(self.w.cpu().numpy().flatten())
+
+
+class TorchLasso(TorchElasticNet):
+    def __init__(self, alpha=1.0, max_iter=1000, tol=1e-5, device="cuda"):
+        super().__init__(
+            alpha=alpha, l1_ratio=1.0, max_iter=max_iter, tol=tol, device=device
+        )
+
+
 def get_model(trial, model_type, prefix="1"):
     if model_type == "ridge":
         alpha = trial.suggest_float(f"ridge_alpha{prefix}", 1e-3, 1e3, log=True)
         return TorchRidge(alpha=alpha, device=DEVICE)
+    elif model_type == "lasso":
+        alpha = trial.suggest_float(f"lasso_alpha{prefix}", 1e-4, 1e2, log=True)
+        return TorchLasso(alpha=alpha, device=DEVICE)
+    elif model_type == "elastic_net":
+        alpha = trial.suggest_float(f"en_alpha{prefix}", 1e-4, 1e2, log=True)
+        l1_ratio = trial.suggest_float(f"en_l1_ratio{prefix}", 0.05, 0.95)
+        return TorchElasticNet(alpha=alpha, l1_ratio=l1_ratio, device=DEVICE)
+    elif model_type == "ols":
+        return TorchLinearRegression(device=DEVICE)
     elif model_type == "catboost":
         params = {
             "iterations": trial.suggest_int(f"cb_iters{prefix}", 100, 500),
@@ -120,11 +310,14 @@ def get_preprocessor():
 def load_data():
     df_train = pd.read_parquet("data/interim/wnir_all_train.parquet")
     df_valid = pd.read_parquet("data/interim/wnir_all_valid.parquet")
+    df_test = pd.read_parquet("data/interim/wnir_all_test.parquet")
     df_train["date"] = pd.to_datetime(df_train["date"])
     df_valid["date"] = pd.to_datetime(df_valid["date"])
+    df_test["date"] = pd.to_datetime(df_test["date"])
     df_train["set_type"] = "train"
     df_valid["set_type"] = "valid"
-    return df_train, df_valid
+    df_test["set_type"] = "test"
+    return df_train, df_valid, df_test
 
 
 def get_base_feature_names(preprocessor):
@@ -134,20 +327,19 @@ def get_base_feature_names(preprocessor):
     return BASE_NUM_FEATURES + list(cat_cols)
 
 
-def log_fi_to_mlflow(importances, feature_names, filename):
+def log_fi(importances, feature_names, filename):
     df = pd.DataFrame({"feature": feature_names, "importance": importances})
     df = df.sort_values("importance", ascending=False)
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
-        df.to_csv(f.name, index=False)
-        mlflow.log_artifact(f.name, filename)
-    os.remove(f.name)
+    mlflow.log_text(df.to_csv(index=False), filename)
 
 
 # ==========================================
 # 3. ЦЕЛЕВЫЕ ФУНКЦИИ OPTUNA
 # ==========================================
-def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_type):
+def objective_global(
+    trial, df_train, df_valid, preprocessor, cfg: ExpConfig, wnir_params, model_type,
+    phase="valid",
+):
     train_p = df_train[df_train["market_type"] == "primary"].copy()
     valid_p = df_valid[df_valid["market_type"] == "primary"].copy()
 
@@ -161,13 +353,10 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_ty
 
     metrics = {}
 
-    if exp_type in [1.3, 1.4]:
-        R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
+    if cfg.mode == "two_stage":
+        R = trial.suggest_categorical("R", list(wnir_params["R"].values()))
 
-    if exp_type in [1.1, 1.3]:
-        X_tr_step1, X_va_step1 = X_train_base, X_valid_base
-        feat_names_step1 = base_feat_names.copy()
-    else:  # 1.2, 1.4
+    if cfg.includes_wnir_all:
         s_cols = [
             c for c in train_p.columns if c.startswith("wnir_s_") and c.endswith("_all")
         ]
@@ -176,15 +365,18 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_ty
         X_tr_step1 = np.hstack([X_train_base, X_tr_s])
         X_va_step1 = np.hstack([X_valid_base, X_va_s])
         feat_names_step1 = base_feat_names + s_cols
+    else:
+        X_tr_step1, X_va_step1 = X_train_base, X_valid_base
+        feat_names_step1 = base_feat_names.copy()
 
-    if exp_type in [1.1, 1.2]:
+    if cfg.mode == "direct":
         model = get_model(trial, model_type, prefix="1")
         model.fit(X_tr_step1, y_train)
         preds = model.predict(X_va_step1)
-        log_fi_to_mlflow(model.feature_importances_, feat_names_step1, "fi_main.csv")
+        log_fi(model.feature_importances_, feat_names_step1, f"{phase}_fi_main.csv")
 
-    elif exp_type in [1.3, 1.4]:
-        proxy_col = f"wnir_p_value_{R}_all"
+    else:  # corrector
+        proxy_col = f"wnir_p_value_{R}_{cfg.proxy_suffix}"
         y_train_proxy = train_p[proxy_col].fillna(0).values.astype(np.float32)
         y_valid_proxy = valid_p[proxy_col].fillna(0).values.astype(np.float32)
 
@@ -193,7 +385,7 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_ty
         pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
         pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
 
-        log_fi_to_mlflow(model1.feature_importances_, feat_names_step1, "fi_proxy.csv")
+        log_fi(model1.feature_importances_, feat_names_step1, f"{phase}_fi_proxy.csv")
 
         metrics["valid_proxy_rmse"] = float(
             np.sqrt(mean_squared_error(y_valid_proxy, pred_proxy_va))
@@ -207,7 +399,7 @@ def objective_global(trial, df_train, df_valid, preprocessor, exp_type, model_ty
         model2.fit(X_tr_step2, y_train)
         preds = model2.predict(X_va_step2)
 
-        log_fi_to_mlflow(model2.feature_importances_, feat_names_step2, "fi_main.csv")
+        log_fi(model2.feature_importances_, feat_names_step2, f"{phase}_fi_main.csv")
 
     metrics["valid_rmse"] = float(np.sqrt(mean_squared_error(y_valid, preds)))
     metrics["valid_mae"] = float(mean_absolute_error(y_valid, preds))
@@ -225,10 +417,11 @@ def objective_cluster(
     df_train,
     df_valid,
     preprocessor,
-    exp_type,
+    cfg: ExpConfig,
     wnir_params,
     model_type,
     cluster_algo,
+    phase="valid",
 ):
     df_train = df_train.reset_index(drop=True).copy()
     df_valid = df_valid.reset_index(drop=True).copy()
@@ -280,10 +473,10 @@ def objective_cluster(
     valid_p_idx = df_valid[df_valid["market_type"] == "primary"].index
     valid_preds = pd.Series(index=valid_p_idx, dtype=np.float32)
 
-    if exp_type in [2.3, 2.4, 3.2, 3.3]:
+    if cfg.mode == "two_stage":
         valid_proxy_preds = pd.Series(index=valid_p_idx, dtype=np.float32)
         valid_proxy_true = pd.Series(index=valid_p_idx, dtype=np.float32)
-        R = trial.suggest_categorical("R", [100, 500, 1000, 5000, 10000])
+        R = trial.suggest_categorical("R", list(wnir_params["R"].values()))
 
     fi_accum_step1 = 0
     fi_accum_step2 = 0
@@ -296,7 +489,7 @@ def objective_cluster(
         c_train_all = df_train[df_train["cluster"] == c].copy()
         c_valid_all = df_valid[df_valid["cluster"] == c].copy()
 
-        if exp_type in [3.1, 3.2, 3.3]:
+        if cfg.needs_per_cluster_wnir:
             c_train_all["orig_idx"] = c_train_all.index
             c_valid_all["orig_idx"] = c_valid_all.index
             c_combined = pd.concat([c_train_all, c_valid_all], ignore_index=True)
@@ -336,9 +529,8 @@ def objective_cluster(
             if len(c_valid_p) > 0:
                 valid_preds.loc[c_valid_p.index] = np.float32(global_mean_price)
 
-                if exp_type in [2.3, 2.4, 3.2, 3.3]:
-                    suffix = "all" if exp_type in [2.3, 2.4] else "cluster"
-                    proxy_col = f"wnir_p_value_{R}_{suffix}"
+                if cfg.mode == "two_stage":
+                    proxy_col = f"wnir_p_value_{R}_{cfg.proxy_suffix}"
 
                     y_va_proxy_fallback = (
                         c_valid_p[proxy_col].fillna(0).values.astype(np.float32)
@@ -361,54 +553,36 @@ def objective_cluster(
         y_tr = c_train_p[TARGET].values.astype(np.float32)
 
         # 4. Формирование фичей
-        if exp_type in [2.1, 2.3]:
+        extra_cols = []
+        if cfg.includes_wnir_all:
+            extra_cols.extend(
+                col
+                for col in c_train_p.columns
+                if col.startswith("wnir_s_") and col.endswith("_all")
+            )
+        if cfg.includes_wnir_cluster:
+            extra_cols.extend(
+                col
+                for col in c_train_p.columns
+                if col.startswith("wnir_s_") and col.endswith("_cluster")
+            )
+
+        if extra_cols:
+            X_tr_step1 = np.hstack(
+                [X_tr_base, c_train_p[extra_cols].fillna(0).values.astype(np.float32)]
+            )
+            X_va_step1 = np.hstack(
+                [X_va_base, c_valid_p[extra_cols].fillna(0).values.astype(np.float32)]
+            )
+            if feat_names_step1 is None:
+                feat_names_step1 = base_feat_names + extra_cols
+        else:
             X_tr_step1, X_va_step1 = X_tr_base, X_va_base
             if feat_names_step1 is None:
                 feat_names_step1 = base_feat_names.copy()
 
-        elif exp_type in [2.2, 2.4, 3.2]:
-            s_cols = [
-                col
-                for col in c_train_p.columns
-                if col.startswith("wnir_s_") and col.endswith("_all")
-            ]
-            X_tr_step1 = np.hstack(
-                [X_tr_base, c_train_p[s_cols].fillna(0).values.astype(np.float32)]
-            )
-            X_va_step1 = np.hstack(
-                [X_va_base, c_valid_p[s_cols].fillna(0).values.astype(np.float32)]
-            )
-            if feat_names_step1 is None:
-                feat_names_step1 = base_feat_names + s_cols
-
-        elif exp_type in [3.1, 3.3]:
-            s_all = [
-                col
-                for col in c_train_p.columns
-                if col.startswith("wnir_s_") and col.endswith("_all")
-            ]
-            s_cluster = [
-                col
-                for col in c_train_p.columns
-                if col.startswith("wnir_s_") and col.endswith("_cluster")
-            ]
-            X_tr_step1 = np.hstack(
-                [
-                    X_tr_base,
-                    c_train_p[s_all + s_cluster].fillna(0).values.astype(np.float32),
-                ]
-            )
-            X_va_step1 = np.hstack(
-                [
-                    X_va_base,
-                    c_valid_p[s_all + s_cluster].fillna(0).values.astype(np.float32),
-                ]
-            )
-            if feat_names_step1 is None:
-                feat_names_step1 = base_feat_names + s_all + s_cluster
-
         # 5. Обучение моделей
-        if exp_type in [2.1, 2.2, 3.1]:
+        if cfg.mode == "direct":
             # Проверяем, не одинаковые ли все значения таргета
             if np.all(y_tr == y_tr[0]):
                 cluster_preds = np.full(len(X_va_step1), y_tr[0], dtype=np.float32)
@@ -423,8 +597,7 @@ def objective_cluster(
             total_samples += n_p
 
         else:
-            suffix = "all" if exp_type in [2.3, 2.4] else "cluster"
-            proxy_col = f"wnir_p_value_{R}_{suffix}"
+            proxy_col = f"wnir_p_value_{R}_{cfg.proxy_suffix}"
 
             y_tr_proxy = c_train_p[proxy_col].fillna(0).values.astype(np.float32)
             y_va_proxy = c_valid_p[proxy_col].fillna(0).values.astype(np.float32)
@@ -497,14 +670,14 @@ def objective_cluster(
 
     # 6. Усреднение и логирование FI
     if total_samples > 0:
-        if exp_type in [2.1, 2.2, 3.1]:
+        if cfg.mode == "direct":
             avg_fi_main = fi_accum_step1 / total_samples
-            log_fi_to_mlflow(avg_fi_main, feat_names_step1, "fi_main.csv")
+            log_fi(avg_fi_main, feat_names_step1, f"{phase}_fi_main.csv")
         else:
             avg_fi_proxy = fi_accum_step1 / total_samples
             avg_fi_main = fi_accum_step2 / total_samples
-            log_fi_to_mlflow(avg_fi_proxy, feat_names_step1, "fi_proxy.csv")
-            log_fi_to_mlflow(avg_fi_main, feat_names_step2, "fi_main.csv")
+            log_fi(avg_fi_proxy, feat_names_step1, f"{phase}_fi_proxy.csv")
+            log_fi(avg_fi_main, feat_names_step2, f"{phase}_fi_main.csv")
 
     # 7. Финальные метрики (со страховкой от NaN)
     y_true_final = df_valid.loc[valid_p_idx, TARGET].values.astype(np.float32)
@@ -531,7 +704,7 @@ def objective_cluster(
         "valid_r2": float(r2_score(y_true_final, y_pred_final)),
     }
 
-    if exp_type in [2.3, 2.4, 3.2, 3.3]:
+    if cfg.mode == "two_stage":
         vp_true = valid_proxy_true.fillna(0.0).values.astype(np.float32)
         vp_preds = valid_proxy_preds.fillna(0.0).values.astype(np.float32)
 
@@ -549,22 +722,89 @@ def objective_cluster(
 # ==========================================
 # 4. ДВИЖОК ЭКСПЕРИМЕНТОВ
 # ==========================================
-def run_experiment(
-    exp_name,
-    exp_type,
+def evaluate_on_test(
+    study,
+    cfg: ExpConfig,
     model_type,
     df_train,
     df_valid,
+    df_test,
+    preprocessor,
+    wnir_params,
+    cluster_algo,
+):
+    """Retrain with best params on train+valid, evaluate on test, log test_* metrics.
+
+    Returns (test_metrics, best_params, best_valid_rmse) or (None, None, None) on failure.
+    """
+    try:
+        best_params = study.best_params
+        best_trial_number = study.best_trial.number
+        best_valid_rmse = study.best_value
+    except ValueError:
+        print(f"[{study.study_name}] No best trial available, skipping test evaluation.")
+        return None, None, None
+
+    # Combine train+valid as the new training set; test plays the role of "valid".
+    # set_type is reassigned so the super-scope split-by-set_type logic still works.
+    df_train_full = pd.concat([df_train, df_valid], ignore_index=True).copy()
+    df_train_full["set_type"] = "train"
+    df_test_eval = df_test.copy()
+    df_test_eval["set_type"] = "valid"
+
+    fixed_trial = optuna.trial.FixedTrial(best_params)
+
+    with mlflow.start_run(nested=True, run_name="Final_Test"):
+        mlflow.set_tags({**cfg.tags(), "model_type": model_type,
+                         "cluster_algo": cluster_algo, "phase": "test"})
+        mlflow.log_param("best_trial_number", best_trial_number)
+        mlflow.log_params(best_params)
+        mlflow.log_metric("best_valid_rmse", float(best_valid_rmse))
+
+        if cfg.scope == "global":
+            metrics_dict = objective_global(
+                fixed_trial, df_train_full, df_test_eval, preprocessor,
+                cfg, wnir_params, model_type, phase="test",
+            )
+        else:
+            metrics_dict = objective_cluster(
+                fixed_trial, df_train_full, df_test_eval, preprocessor,
+                cfg, wnir_params, model_type, cluster_algo, phase="test",
+            )
+
+        test_metrics = {k.replace("valid_", "test_"): v for k, v in metrics_dict.items()}
+        mlflow.log_metrics(test_metrics)
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    print(
+        f"[{study.study_name}] Test metrics: "
+        + ", ".join(f"{k}={v:.4f}" for k, v in test_metrics.items())
+    )
+    return test_metrics, best_params, float(best_valid_rmse)
+
+
+def run_experiment(
+    cfg: ExpConfig,
+    model_type,
+    df_train,
+    df_valid,
+    df_test,
     preprocessor,
     wnir_params,
     cluster_algo="none",
     n_trials=20,
 ):
     print(
-        f"\n{'=' * 60}\nRunning: {exp_name} | Model: {model_type.upper()} | Clustering: {cluster_algo.upper()}\n{'=' * 60}"
+        f"\n{'=' * 60}\nRunning: {cfg.name} | Model: {model_type.upper()} "
+        f"| Clustering: {cluster_algo.upper()}\n{'=' * 60}"
     )
 
-    study_name = f"{exp_name}_{model_type}_{cluster_algo}"
+    # Tag parent run with orthogonal axes for filter/group in MLflow UI
+    mlflow.set_tags({**cfg.tags(), "model_type": model_type, "cluster_algo": cluster_algo})
+
+    study_name = f"{cfg.name}__{model_type}__{cluster_algo}"
     optuna_db_path = "sqlite:///optuna.db"
 
     study = optuna.create_study(
@@ -572,6 +812,7 @@ def run_experiment(
         study_name=study_name,
         storage=optuna_db_path,
         load_if_exists=True,
+        sampler=optuna.samplers.TPESampler(seed=42),
     )
 
     completed_trials = len(
@@ -580,45 +821,57 @@ def run_experiment(
     trials_to_run = max(0, n_trials - completed_trials)
 
     if trials_to_run == 0:
-        print(f"[{study_name}] Already completed {n_trials} trials. Skipping...")
-        return
+        print(f"[{study_name}] Already completed {n_trials} trials. Skipping HPO...")
+    else:
+        print(
+            f"[{study_name}] Found {completed_trials} completed trials. Running {trials_to_run} more..."
+        )
 
-    print(
-        f"[{study_name}] Found {completed_trials} completed trials. Running {trials_to_run} more..."
+        def objective(trial):
+            with mlflow.start_run(nested=True, run_name=f"Trial_{trial.number}"):
+                mlflow.set_tags({**cfg.tags(), "model_type": model_type,
+                                 "cluster_algo": cluster_algo, "phase": "valid"})
+
+                if cfg.scope == "global":
+                    metrics_dict = objective_global(
+                        trial, df_train, df_valid, preprocessor, cfg,
+                        wnir_params, model_type,
+                    )
+                else:
+                    metrics_dict = objective_cluster(
+                        trial, df_train, df_valid, preprocessor, cfg,
+                        wnir_params, model_type, cluster_algo,
+                    )
+
+                mlflow.log_params(trial.params)
+                mlflow.log_metrics(metrics_dict)
+
+                gc.collect()
+                torch.cuda.empty_cache()
+
+                return metrics_dict["valid_rmse"]
+
+        study.optimize(objective, n_trials=trials_to_run)
+        print(f"[{study_name}] HPO finished! Best valid RMSE: {study.best_value:.4f}")
+
+    test_metrics, best_params, best_valid_rmse = evaluate_on_test(
+        study=study,
+        cfg=cfg,
+        model_type=model_type,
+        df_train=df_train,
+        df_valid=df_valid,
+        df_test=df_test,
+        preprocessor=preprocessor,
+        wnir_params=wnir_params,
+        cluster_algo=cluster_algo,
     )
 
-    def objective(trial):
-        with mlflow.start_run(nested=True, run_name=f"Trial_{trial.number}"):
-            mlflow.log_param("exp_type", exp_type)
-            mlflow.log_param("model_type", model_type)
-            mlflow.log_param("cluster_algo", cluster_algo)
-
-            if exp_type < 2.0:
-                metrics_dict = objective_global(
-                    trial, df_train, df_valid, preprocessor, exp_type, model_type
-                )
-            else:
-                metrics_dict = objective_cluster(
-                    trial,
-                    df_train,
-                    df_valid,
-                    preprocessor,
-                    exp_type,
-                    wnir_params,
-                    model_type,
-                    cluster_algo,
-                )
-
-            mlflow.log_params(trial.params)
-            mlflow.log_metrics(metrics_dict)
-
-            gc.collect()
-            torch.cuda.empty_cache()
-
-            return metrics_dict["valid_rmse"]
-
-    study.optimize(objective, n_trials=trials_to_run)
-    print(f"[{study_name}] Finished! Best RMSE: {study.best_value:.4f}")
+    # Hoist summary metrics to the parent run so experiments are comparable
+    # in the MLflow UI without expanding nested runs.
+    if test_metrics is not None:
+        mlflow.log_metric("best_valid_rmse", best_valid_rmse)
+        mlflow.log_metrics(test_metrics)
+        mlflow.log_params({f"best_{k}": v for k, v in best_params.items()})
 
 
 # ==========================================
@@ -639,45 +892,41 @@ if __name__ == "__main__":
             "batch_size": 20000,
         }
 
-    df_train, df_valid = load_data()
+    df_train, df_valid, df_test = load_data()
     preprocessor = get_preprocessor()
 
     experiments = [
-        ("1.1_Global_Direct_NO_wnir", 1.1),
-        ("1.2_Global_Direct_WITH_wnir", 1.2),
-        ("1.3_Global_Corrector_NO_wnir", 1.3),
-        ("1.4_Global_Corrector_WITH_wnir", 1.4),
-        ("2.1_Cluster_Direct_NO_wnir", 2.1),
-        ("2.2_Cluster_Direct_WITH_wnir", 2.2),
-        ("2.3_Cluster_Corrector_NO_wnir", 2.3),
-        ("2.4_Cluster_Corrector_WITH_wnir", 2.4),
-        ("3.1_Super_Direct_WITH_Micro", 3.1),
-        ("3.2_Super_Corrector_NO_Micro", 3.2),
-        ("3.3_Super_Corrector_WITH_Micro", 3.3),
+        ExpConfig("global", "direct"),
+        ExpConfig("global", "direct", use_wnir=True),
+        ExpConfig("global", "two_stage"),
+        ExpConfig("global", "two_stage", use_wnir=True),
+        ExpConfig("clustered", "direct"),
+        ExpConfig("clustered", "direct", use_wnir=True),
+        ExpConfig("clustered", "two_stage"),
+        ExpConfig("clustered", "two_stage", use_wnir=True),
+        ExpConfig("nested", "direct"),
+        ExpConfig("nested", "two_stage"),
     ]
 
-    for exp_name, exp_type in experiments:
-        for model_type in ["ridge", "catboost"]:
-            if exp_type < 2.0:
-                cluster_algos = ["none"]
-            else:
-                cluster_algos = ["kmeans", "hdbscan"]
+    model_types = ["ridge", "lasso", "elastic_net", "ols", "catboost"]
 
+    for cfg in experiments:
+        cluster_algos = ["none"] if cfg.scope == "global" else ["kmeans", "hdbscan"]
+
+        for model_type in model_types:
             for cluster_algo in cluster_algos:
-                if cluster_algo == "none":
-                    full_exp_name = f"{exp_name}_{model_type.upper()}"
-                else:
-                    full_exp_name = (
-                        f"{exp_name}_{model_type.upper()}_{cluster_algo.upper()}"
-                    )
+                run_name_parts = [cfg.name, model_type]
+                if cluster_algo != "none":
+                    run_name_parts.append(cluster_algo)
+                run_name = "__".join(run_name_parts)
 
-                with mlflow.start_run(run_name=full_exp_name):
+                with mlflow.start_run(run_name=run_name):
                     run_experiment(
-                        exp_name=exp_name,
-                        exp_type=exp_type,
+                        cfg=cfg,
                         model_type=model_type,
                         df_train=df_train,
                         df_valid=df_valid,
+                        df_test=df_test,
                         preprocessor=preprocessor,
                         wnir_params=wnir_params,
                         cluster_algo=cluster_algo,
