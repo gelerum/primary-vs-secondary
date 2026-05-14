@@ -875,7 +875,38 @@ def run_experiment(
 
 
 # ==========================================
-# 5. ТОЧКА ВХОДА
+# 5. АДАПТИВНЫЙ РАЗМЕР HPO
+# ==========================================
+MODEL_PARAMS_PER_STAGE = {
+    "ols": 0, "ridge": 1, "lasso": 1, "elastic_net": 2, "catboost": 3
+}
+CLUSTER_PARAMS = {"none": 0, "kmeans": 1, "hdbscan": 2}
+
+
+def n_trials_for(cfg: ExpConfig, model_type: str, cluster_algo: str) -> int:
+    """Trial budget scales with hyperparameter dimensionality.
+
+    Heuristic: ~10x param count, banded so the rare 0-param case (OLS direct)
+    doesn't waste trials re-fitting the same deterministic model.
+    """
+    stages = 2 if cfg.mode == "two_stage" else 1
+    r_param = 1 if cfg.mode == "two_stage" else 0
+    n_params = (
+        stages * MODEL_PARAMS_PER_STAGE[model_type]
+        + r_param
+        + CLUSTER_PARAMS[cluster_algo]
+    )
+    if n_params == 0:
+        return 1
+    if n_params <= 2:
+        return 15
+    if n_params <= 4:
+        return 30
+    return 50
+
+
+# ==========================================
+# 6. ТОЧКА ВХОДА
 # ==========================================
 if __name__ == "__main__":
     mlflow.set_tracking_uri("sqlite:///mlflow.db")
@@ -920,6 +951,7 @@ if __name__ == "__main__":
                     run_name_parts.append(cluster_algo)
                 run_name = "__".join(run_name_parts)
 
+                n_trials = n_trials_for(cfg, model_type, cluster_algo)
                 with mlflow.start_run(run_name=run_name):
                     run_experiment(
                         cfg=cfg,
@@ -930,7 +962,7 @@ if __name__ == "__main__":
                         preprocessor=preprocessor,
                         wnir_params=wnir_params,
                         cluster_algo=cluster_algo,
-                        n_trials=10,
+                        n_trials=n_trials,
                     )
 
     print("\nAll experiments finished!")
