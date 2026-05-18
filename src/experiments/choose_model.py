@@ -889,6 +889,8 @@ def n_trials_for(cfg: ExpConfig, model_type: str, cluster_algo: str) -> int:
     Heuristic: ~10x param count, banded so the rare 0-param case (OLS direct)
     doesn't waste trials re-fitting the same deterministic model.
     """
+    if model_type == "catboost":
+        return 1
     stages = 2 if cfg.mode == "two_stage" else 1
     r_param = 1 if cfg.mode == "two_stage" else 0
     n_params = (
@@ -899,10 +901,10 @@ def n_trials_for(cfg: ExpConfig, model_type: str, cluster_algo: str) -> int:
     if n_params == 0:
         return 1
     if n_params <= 2:
-        return 15
+        return 8
     if n_params <= 4:
-        return 30
-    return 50
+        return 15
+    return 25
 
 
 # ==========================================
