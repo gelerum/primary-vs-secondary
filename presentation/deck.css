@@ -1,0 +1,279 @@
+/* deck.css — hi-fi defense deck for «Первичка или вторичка?»
+   Дизайн-система:
+   ─ палитра: глубокий чернильный фон, кремовый текст, зелёный и охра как акценты
+   ─ типографика строгая: Inter Tight (заголовки) · Inter (тело) · JetBrains Mono (формулы/числа)
+   ─ нет иконок-эмодзи, нет градиентов, нет округлых "стартаповых" штрихов
+   ─ сетка слайда: 1920×1080, поля 80px, базовая модульная сетка 8px
+*/
+
+:root {
+  /* ── палитра ─────────────────────────────────────────────────── */
+  --bg:         #faf8f3;          /* warm paper */
+  --bg-2:       #f2efe7;          /* card surface (very subtle) */
+  --bg-3:       #ebe7dc;          /* nested */
+  --ink:        #1f1c17;          /* primary text — dark warm */
+  --ink-2:      #5a564e;          /* secondary text */
+  --ink-3:      #9a9389;          /* tertiary / captions */
+  --rule:       rgba(31,28,23,0.10);
+  --rule-2:     rgba(31,28,23,0.20);
+
+  --green:      #3f7c5e;          /* primary accent */
+  --green-soft: rgba(63,124,94,0.10);
+  --gold:       #a06b2a;          /* secondary accent */
+  --gold-soft:  rgba(160,107,42,0.10);
+  --red:        #a14a36;
+
+  /* ── шрифты ──────────────────────────────────────────────────── */
+  --font-head:  "Inter Tight", "Inter", system-ui, sans-serif;
+  --font-body:  "Inter", system-ui, sans-serif;
+  --font-mono:  "JetBrains Mono", ui-monospace, monospace;
+
+  /* ── сетка ───────────────────────────────────────────────────── */
+  --pad:        72px;             /* поля слайда */
+  --gap:        24px;
+}
+
+/* deck_stage already sets 1920×1080 — but make sure section is full-bleed */
+deck-stage > section {
+  width: 1920px;
+  height: 1080px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 24px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* ── slide chrome (kicker + slide number footer) ───────────────── */
+.chrome-top {
+  position: absolute;
+  top: 40px;
+  left: var(--pad);
+  right: var(--pad);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--ink-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.chrome-top .kicker { color: var(--green); }
+/* дата в chrome-top — скрываем на всех слайдах; на cover хрома вообще нет */
+.chrome-top > span:not(.kicker) { display: none; }
+
+/* нижняя полоса убрана целиком */
+.chrome-bottom { display: none; }
+
+/* ── slide body wrapper ────────────────────────────────────────── */
+.body {
+  position: absolute;
+  top: 124px;
+  bottom: 64px;
+  left: var(--pad);
+  right: var(--pad);
+}
+
+/* ── headings ──────────────────────────────────────────────────── */
+h1, h2, h3, h4 {
+  font-family: var(--font-head);
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+h1 { font-size: 112px; line-height: 1.0; font-weight: 500; }
+h2 { font-size: 64px; line-height: 1.05; font-weight: 600; }
+h3 { font-size: 34px; line-height: 1.15; font-weight: 600; }
+h4 { font-size: 22px; line-height: 1.2; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-2); }
+
+.title-rule {
+  height: 1px;
+  background: var(--rule);
+  margin-top: 22px;
+  width: 100%;
+}
+
+/* ── text utilities ────────────────────────────────────────────── */
+.t-mono { font-family: var(--font-mono); }
+.t-sub  { color: var(--ink-2); }
+.t-cap  { color: var(--ink-3); font-size: 18px; letter-spacing: 0.03em; }
+.t-green { color: var(--green); }
+.t-gold { color: var(--gold); }
+.t-red { color: var(--red); }
+
+p { margin: 0 0 14px; }
+ul { margin: 0; padding-left: 24px; }
+ul li { margin-bottom: 8px; }
+
+/* ── card / panel ──────────────────────────────────────────────── */
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--rule);
+  padding: 28px 32px;
+  box-sizing: border-box;
+}
+.card.accent-green { border-left: 2px solid var(--green); }
+.card.accent-gold { border-left: 2px solid var(--gold); }
+
+/* ── chips ─────────────────────────────────────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--rule-2);
+  color: var(--ink-2);
+  text-transform: uppercase;
+}
+.chip.green { color: var(--green); border-color: var(--green); }
+.chip.gold { color: var(--gold); border-color: var(--gold); }
+
+/* ── KPI ───────────────────────────────────────────────────────── */
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.kpi .k { font-family: var(--font-mono); font-size: 14px; color: var(--ink-3); letter-spacing: 0.08em; text-transform: uppercase; }
+.kpi .v { font-family: var(--font-head); font-size: 64px; font-weight: 500; line-height: 1; letter-spacing: -0.02em; color: var(--ink); }
+.kpi .v.green { color: var(--green); }
+.kpi .v.gold { color: var(--gold); }
+.kpi .s { font-size: 18px; color: var(--ink-3); }
+
+/* ── inline math ───────────────────────────────────────────────── */
+.math {
+  font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 36px;
+  color: var(--ink);
+}
+.math .frac {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.05;
+}
+.math .frac > :last-child {
+  border-top: 1.5px solid var(--ink);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+.math sub, .math sup { font-size: 0.65em; }
+
+/* ── tables ────────────────────────────────────────────────────── */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 20px;
+}
+.table th, .table td {
+  text-align: left;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+.table th {
+  font-weight: 600;
+  color: var(--ink-2);
+  text-transform: uppercase;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid var(--rule-2);
+}
+.table tr.highlight td {
+  color: var(--green);
+  background: var(--green-soft);
+}
+.table td.num { text-align: right; }
+
+/* ── image placeholder (striped) ───────────────────────────────── */
+.img-ph {
+  background-color: var(--bg-3);
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(31,28,23,0.04) 0 12px,
+    transparent 12px 24px
+  );
+  border: 1px dashed var(--rule-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ── timeline (для evolution) ──────────────────────────────────── */
+.timeline {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+  padding-top: 40px;
+}
+.timeline::before {
+  content: '';
+  position: absolute;
+  top: 56px;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  background: var(--rule-2);
+}
+.timeline .dot {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  margin-bottom: 18px;
+  position: relative;
+  z-index: 2;
+}
+
+/* ── tree (slide 10) ───────────────────────────────────────────── */
+.tree-node {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  padding: 10px 16px;
+  border: 1px solid var(--rule-2);
+  background: var(--bg-2);
+  color: var(--ink);
+}
+.tree-node.green { border-color: var(--green); color: var(--green); }
+.tree-node.gold { border-color: var(--gold); color: var(--gold); }
+.tree-node.muted { color: var(--ink-3); }
+
+/* ── photo slot for team page ─────────────────────────────────── */
+image-slot {
+  --img-slot-bg: var(--bg-3);
+  --img-slot-border: var(--rule-2);
+  --img-slot-text: var(--ink-3);
+}
+
+/* ── tiny utilities ────────────────────────────────────────────── */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap); }
+.grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--gap); }
+.row { display: flex; gap: var(--gap); align-items: stretch; }
+.stack { display: flex; flex-direction: column; gap: var(--gap); }
+.fill { flex: 1; }
+.center { display: flex; align-items: center; justify-content: center; }
+.mt-s { margin-top: 16px; }
+.mt-m { margin-top: 32px; }
+.mt-l { margin-top: 48px; }
+.mt-xl { margin-top: 64px; }
+
+/* fine separator */
+.hr { height: 1px; background: var(--rule); margin: 16px 0; }

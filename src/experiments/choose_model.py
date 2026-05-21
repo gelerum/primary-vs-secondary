@@ -287,6 +287,7 @@ def get_model(trial, model_type, prefix="1"):
             "learning_rate": trial.suggest_float(f"cb_lr{prefix}", 1e-3, 0.3, log=True),
             "verbose": 0,
             "task_type": "GPU" if torch.cuda.is_available() else "CPU",
+            "random_seed": 42,
         }
         return CatBoostRegressor(**params)
 
@@ -333,6 +334,14 @@ def log_fi(importances, feature_names, filename):
     mlflow.log_text(df.to_csv(index=False), filename)
 
 
+def fit_transform_block(X_tr, X_va):
+    """Fit StandardScaler on X_tr, transform both. Fresh scaler per call — no leakage."""
+    scaler = StandardScaler()
+    X_tr_s = scaler.fit_transform(X_tr).astype(np.float32)
+    X_va_s = scaler.transform(X_va).astype(np.float32)
+    return X_tr_s, X_va_s
+
+
 # ==========================================
 # 3. ЦЕЛЕВЫЕ ФУНКЦИИ OPTUNA
 # ==========================================
@@ -340,6 +349,9 @@ def objective_global(
     trial, df_train, df_valid, preprocessor, cfg: ExpConfig, wnir_params, model_type,
     phase="valid",
 ):
+    torch.manual_seed(42)
+    np.random.seed(42)
+
     train_p = df_train[df_train["market_type"] == "primary"].copy()
     valid_p = df_valid[df_valid["market_type"] == "primary"].copy()
 
@@ -362,6 +374,7 @@ def objective_global(
         ]
         X_tr_s = train_p[s_cols].fillna(0).values.astype(np.float32)
         X_va_s = valid_p[s_cols].fillna(0).values.astype(np.float32)
+        X_tr_s, X_va_s = fit_transform_block(X_tr_s, X_va_s)
         X_tr_step1 = np.hstack([X_train_base, X_tr_s])
         X_va_step1 = np.hstack([X_valid_base, X_va_s])
         feat_names_step1 = base_feat_names + s_cols
@@ -380,19 +393,28 @@ def objective_global(
         y_train_proxy = train_p[proxy_col].fillna(0).values.astype(np.float32)
         y_valid_proxy = valid_p[proxy_col].fillna(0).values.astype(np.float32)
 
+        y_proxy_scaler = StandardScaler()
+        y_tr_proxy_scaled = y_proxy_scaler.fit_transform(
+            y_train_proxy.reshape(-1, 1)
+        ).flatten()
+
         model1 = get_model(trial, model_type, prefix="1")
-        model1.fit(X_tr_step1, y_train_proxy)
-        pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
-        pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
+        model1.fit(X_tr_step1, y_tr_proxy_scaled)
+        pred_proxy_tr_scaled = model1.predict(X_tr_step1).reshape(-1, 1)
+        pred_proxy_va_scaled = model1.predict(X_va_step1).reshape(-1, 1)
 
         log_fi(model1.feature_importances_, feat_names_step1, f"{phase}_fi_proxy.csv")
 
+        # Inverse-transform only for raw-scale metric (interpretable RMSE).
+        pred_proxy_va_raw = y_proxy_scaler.inverse_transform(
+            pred_proxy_va_scaled
+        ).flatten()
         metrics["valid_proxy_rmse"] = float(
-            np.sqrt(mean_squared_error(y_valid_proxy, pred_proxy_va))
+            np.sqrt(mean_squared_error(y_valid_proxy, pred_proxy_va_raw))
         )
 
-        X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr])
-        X_va_step2 = np.hstack([X_va_step1, pred_proxy_va])
+        X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr_scaled])
+        X_va_step2 = np.hstack([X_va_step1, pred_proxy_va_scaled])
         feat_names_step2 = feat_names_step1 + ["proxy_prediction"]
 
         model2 = get_model(trial, model_type, prefix="2")
@@ -423,14 +445,21 @@ def objective_cluster(
     cluster_algo,
     phase="valid",
 ):
+    torch.manual_seed(42)
+    np.random.seed(42)
+
     df_train = df_train.reset_index(drop=True).copy()
     df_valid = df_valid.reset_index(drop=True).copy()
 
     global_mean_price = df_train[df_train["market_type"] == "primary"][TARGET].mean()
 
-    # 1. Кластеризация
-    X_train_all = preprocessor.fit_transform(df_train).astype(np.float32)
-    X_valid_all = preprocessor.transform(df_valid).astype(np.float32)
+    # 1. Кластеризация — отдельный preprocessor на primary+secondary
+    cluster_preprocessor = get_preprocessor()
+    X_train_all = cluster_preprocessor.fit_transform(df_train).astype(np.float32)
+    X_valid_all = cluster_preprocessor.transform(df_valid).astype(np.float32)
+
+    # Regression preprocessor — фит на primary, единая шкала с objective_global
+    preprocessor.fit(df_train[df_train["market_type"] == "primary"])
     base_feat_names = get_base_feature_names(preprocessor)
 
     if cluster_algo == "kmeans":
@@ -485,7 +514,7 @@ def objective_cluster(
     feat_names_step2 = None
 
     # 3. Цикл по уникальным кластерам
-    for c in unique_clusters:
+    for cluster_idx, c in enumerate(unique_clusters):
         c_train_all = df_train[df_train["cluster"] == c].copy()
         c_valid_all = df_valid[df_valid["cluster"] == c].copy()
 
@@ -568,12 +597,11 @@ def objective_cluster(
             )
 
         if extra_cols:
-            X_tr_step1 = np.hstack(
-                [X_tr_base, c_train_p[extra_cols].fillna(0).values.astype(np.float32)]
-            )
-            X_va_step1 = np.hstack(
-                [X_va_base, c_valid_p[extra_cols].fillna(0).values.astype(np.float32)]
-            )
+            X_tr_extra = c_train_p[extra_cols].fillna(0).values.astype(np.float32)
+            X_va_extra = c_valid_p[extra_cols].fillna(0).values.astype(np.float32)
+            X_tr_extra, X_va_extra = fit_transform_block(X_tr_extra, X_va_extra)
+            X_tr_step1 = np.hstack([X_tr_base, X_tr_extra])
+            X_va_step1 = np.hstack([X_va_base, X_va_extra])
             if feat_names_step1 is None:
                 feat_names_step1 = base_feat_names + extra_cols
         else:
@@ -610,25 +638,44 @@ def objective_cluster(
                 pred_proxy_va = np.full(
                     (len(X_va_step1), 1), y_tr_proxy[0], dtype=np.float32
                 )
+                pred_proxy_tr_scaled = np.zeros(
+                    (len(X_tr_step1), 1), dtype=np.float32
+                )
+                pred_proxy_va_scaled = np.zeros(
+                    (len(X_va_step1), 1), dtype=np.float32
+                )
                 fi1 = np.zeros(X_tr_step1.shape[1], dtype=np.float32)
             else:
-                model1 = get_model(trial, model_type, prefix="1")
-                model1.fit(X_tr_step1, y_tr_proxy)
-                pred_proxy_tr = model1.predict(X_tr_step1).reshape(-1, 1)
-                pred_proxy_va = model1.predict(X_va_step1).reshape(-1, 1)
+                y_proxy_scaler = StandardScaler()
+                y_tr_proxy_scaled = y_proxy_scaler.fit_transform(
+                    y_tr_proxy.reshape(-1, 1)
+                ).flatten()
 
-                # ИСПРАВЛЕНИЕ: Защита от бесконечностей (inf) для Ridge
-                pred_proxy_tr = np.nan_to_num(
-                    pred_proxy_tr, nan=0.0, posinf=0.0, neginf=0.0
+                model1 = get_model(trial, model_type, prefix="1")
+                model1.fit(X_tr_step1, y_tr_proxy_scaled)
+                pred_proxy_tr_scaled = model1.predict(X_tr_step1).reshape(-1, 1)
+                pred_proxy_va_scaled = model1.predict(X_va_step1).reshape(-1, 1)
+
+                # Защита от inf (Ridge на плохо обусловленной X^T X)
+                pred_proxy_tr_scaled = np.nan_to_num(
+                    pred_proxy_tr_scaled, nan=0.0, posinf=0.0, neginf=0.0
                 )
-                pred_proxy_va = np.nan_to_num(
-                    pred_proxy_va, nan=0.0, posinf=0.0, neginf=0.0
+                pred_proxy_va_scaled = np.nan_to_num(
+                    pred_proxy_va_scaled, nan=0.0, posinf=0.0, neginf=0.0
                 )
+
+                # Unscale для valid_proxy_rmse (хранится на сырой шкале proxy-таргета)
+                pred_proxy_tr = y_proxy_scaler.inverse_transform(
+                    pred_proxy_tr_scaled
+                ).astype(np.float32)
+                pred_proxy_va = y_proxy_scaler.inverse_transform(
+                    pred_proxy_va_scaled
+                ).astype(np.float32)
 
                 fi1 = model1.feature_importances_
 
-            X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr])
-            X_va_step2 = np.hstack([X_va_step1, pred_proxy_va])
+            X_tr_step2 = np.hstack([X_tr_step1, pred_proxy_tr_scaled])
+            X_va_step2 = np.hstack([X_va_step1, pred_proxy_va_scaled])
             if feat_names_step2 is None:
                 feat_names_step2 = feat_names_step1 + ["proxy_prediction"]
 
@@ -667,6 +714,22 @@ def objective_cluster(
         # ==========================================
         valid_preds.loc[c_valid_p.index] = cluster_preds.astype(np.float32)
         # ==========================================
+
+        # Pruner: running RMSE на уже обработанных valid-точках.
+        # Только во время HPO (phase == "valid"), не на финальном test-replay.
+        if phase == "valid":
+            processed = valid_preds.dropna()
+            if len(processed) > 0:
+                y_true_so_far = df_valid.loc[processed.index, TARGET].values.astype(
+                    np.float32
+                )
+                y_pred_so_far = processed.values.astype(np.float32)
+                running_rmse = float(
+                    np.sqrt(mean_squared_error(y_true_so_far, y_pred_so_far))
+                )
+                trial.report(running_rmse, step=cluster_idx)
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
 
     # 6. Усреднение и логирование FI
     if total_samples > 0:
@@ -813,6 +876,7 @@ def run_experiment(
         storage=optuna_db_path,
         load_if_exists=True,
         sampler=optuna.samplers.TPESampler(seed=42),
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=2, n_warmup_steps=2),
     )
 
     completed_trials = len(
@@ -831,28 +895,34 @@ def run_experiment(
             with mlflow.start_run(nested=True, run_name=f"Trial_{trial.number}"):
                 mlflow.set_tags({**cfg.tags(), "model_type": model_type,
                                  "cluster_algo": cluster_algo, "phase": "valid"})
+                try:
+                    if cfg.scope == "global":
+                        metrics_dict = objective_global(
+                            trial, df_train, df_valid, preprocessor, cfg,
+                            wnir_params, model_type,
+                        )
+                    else:
+                        metrics_dict = objective_cluster(
+                            trial, df_train, df_valid, preprocessor, cfg,
+                            wnir_params, model_type, cluster_algo,
+                        )
 
-                if cfg.scope == "global":
-                    metrics_dict = objective_global(
-                        trial, df_train, df_valid, preprocessor, cfg,
-                        wnir_params, model_type,
-                    )
-                else:
-                    metrics_dict = objective_cluster(
-                        trial, df_train, df_valid, preprocessor, cfg,
-                        wnir_params, model_type, cluster_algo,
-                    )
+                    mlflow.log_params(trial.params)
+                    mlflow.log_metrics(metrics_dict)
 
-                mlflow.log_params(trial.params)
-                mlflow.log_metrics(metrics_dict)
-
-                gc.collect()
-                torch.cuda.empty_cache()
-
-                return metrics_dict["valid_rmse"]
+                    return metrics_dict["valid_rmse"]
+                except optuna.TrialPruned:
+                    mlflow.set_tag("status", "pruned")
+                    raise
+                finally:
+                    gc.collect()
+                    torch.cuda.empty_cache()
 
         study.optimize(objective, n_trials=trials_to_run)
-        print(f"[{study_name}] HPO finished! Best valid RMSE: {study.best_value:.4f}")
+        try:
+            print(f"[{study_name}] HPO finished! Best valid RMSE: {study.best_value:.4f}")
+        except ValueError:
+            print(f"[{study_name}] HPO finished — no completed trials (all pruned).")
 
     test_metrics, best_params, best_valid_rmse = evaluate_on_test(
         study=study,
@@ -884,13 +954,9 @@ CLUSTER_PARAMS = {"none": 0, "kmeans": 1, "hdbscan": 2}
 
 
 def n_trials_for(cfg: ExpConfig, model_type: str, cluster_algo: str) -> int:
-    """Trial budget scales with hyperparameter dimensionality.
-
-    Heuristic: ~10x param count, banded so the rare 0-param case (OLS direct)
-    doesn't waste trials re-fitting the same deterministic model.
-    """
+    """Minimal trial budget: enough to probe each param dimension once or twice."""
     if model_type == "catboost":
-        return 1
+        return 3
     stages = 2 if cfg.mode == "two_stage" else 1
     r_param = 1 if cfg.mode == "two_stage" else 0
     n_params = (
@@ -901,10 +967,10 @@ def n_trials_for(cfg: ExpConfig, model_type: str, cluster_algo: str) -> int:
     if n_params == 0:
         return 1
     if n_params <= 2:
-        return 8
+        return 3
     if n_params <= 4:
-        return 15
-    return 25
+        return 5
+    return 8
 
 
 # ==========================================
