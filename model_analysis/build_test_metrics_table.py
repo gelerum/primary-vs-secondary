@@ -1,18 +1,13 @@
-"""Build presentation/Defense-Deck-style pivot CSV (10 configs × 5 models) from MLflow.
+"""Dump all Final_Test runs from MLflow into a flat CSV with one row per run.
 
-Reads Final_Test runs (tagged phase=test) from sqlite:///mlflow.db, picks the
-winning cluster_algo per (config, model) for clustered/nested scopes by min
-test_rmse, formats each cell exactly like the deck:
-    {rmse/1000:.1f}k\n{mae/1000:.1f}k · {mape*100:.1f}% · {r2:.2f}[ · prx ...][ · km|hdb]
-Writes model_analysis/test_metrics_pivot.csv.
+Columns: config axes, model, cluster algo & sizes, all test_* metrics,
+best_valid_rmse, run_id, start_time. Output: model_analysis/test_metrics.csv.
 
 Run after a fresh experiment sweep:
     python -m src.experiments.choose_model
     python model_analysis/build_test_metrics_table.py
 """
 
-import csv
-import math
 import sys
 from pathlib import Path
 
@@ -21,7 +16,7 @@ import pandas as pd
 
 MLFLOW_DB = "sqlite:///mlflow.db"
 EXPERIMENT_NAME = "Real_Estate_Pricing_Pipelines"
-OUT_PATH = Path(__file__).parent / "test_metrics_pivot.csv"
+OUT_PATH = Path(__file__).parent / "test_metrics.csv"
 
 CONFIG_ORDER = [
     "global_direct",
@@ -36,8 +31,29 @@ CONFIG_ORDER = [
     "nested_two_stage",
 ]
 MODEL_ORDER = ["ridge", "lasso", "elastic_net", "ols", "catboost"]
-CLUSTER_BADGE = {"kmeans": "km", "hdbscan": "hdb"}
-DASH = "—"
+CLUSTER_ORDER = ["none", "kmeans", "hdbscan"]
+
+OUTPUT_COLS = [
+    "cfg_name",
+    "scope",
+    "mode",
+    "includes_wnir_all",
+    "includes_wnir_cluster",
+    "model_type",
+    "cluster_algo",
+    "n_clusters",
+    "hdb_min_cluster_size",
+    "hdb_min_samples",
+    "R",
+    "test_rmse",
+    "test_mae",
+    "test_mape",
+    "test_r2",
+    "test_proxy_rmse",
+    "best_valid_rmse",
+    "start_time",
+    "run_id",
+]
 
 
 def build_cfg_name(row) -> str:
@@ -48,51 +64,6 @@ def build_cfg_name(row) -> str:
     if row.get("tags.includes_wnir_cluster") == "True":
         suffix += "+wnir_cluster"
     return base + suffix
-
-
-def fmt_k(v) -> str:
-    if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
-        return DASH
-    return f"{v / 1000:.1f}k"
-
-
-def fmt_mape(v) -> str:
-    # MAPE > 1000% almost certainly means the model diverged — show a dash so the
-    # cell stays readable.
-    if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
-        return DASH
-    if v > 10:
-        return DASH
-    return f"{v * 100:.1f}%"
-
-
-def fmt_r2(v) -> str:
-    if v is None or (isinstance(v, float) and (math.isnan(v) or math.isinf(v))):
-        return DASH
-    if v < 0:
-        return DASH
-    return f"{v:.2f}"
-
-
-def format_cell(row) -> str:
-    rmse = row.get("metrics.test_rmse")
-    if rmse is None or (isinstance(rmse, float) and (math.isnan(rmse) or math.isinf(rmse))):
-        return DASH
-
-    big = fmt_k(rmse)
-
-    meta_parts = [
-        fmt_k(row.get("metrics.test_mae")),
-        fmt_mape(row.get("metrics.test_mape")),
-        fmt_r2(row.get("metrics.test_r2")),
-    ]
-    if row["tags.mode"] == "two_stage":
-        meta_parts.append(f"prx {fmt_k(row.get('metrics.test_proxy_rmse'))}")
-    if row["tags.scope"] in ("clustered", "nested"):
-        badge = CLUSTER_BADGE.get(row.get("tags.cluster_algo"), "?")
-        meta_parts.append(badge)
-
-    return f"{big}\n{' · '.join(meta_parts)}"
 
 
 def main() -> int:
@@ -111,52 +82,64 @@ def main() -> int:
         output_format="pandas",
     )
     if runs.empty:
-        sys.exit(
-            "ERROR: no Final_Test runs (tags.phase='test') found. "
-            "Run `python -m src.experiments.choose_model` first."
-        )
+        sys.exit("ERROR: no Final_Test runs (tags.phase='test') found.")
 
     runs["cfg_name"] = runs.apply(build_cfg_name, axis=1)
 
-    # Per (cfg, model, cluster_algo): keep the most recent Final_Test run.
+    # If a (cfg, model, cluster_algo) was rerun, keep the most recent.
     runs = runs.sort_values("start_time", ascending=False)
     runs = runs.drop_duplicates(
         subset=["cfg_name", "tags.model_type", "tags.cluster_algo"], keep="first"
     )
 
-    # Per (cfg, model): for clustered/nested, pick winning cluster_algo by min test_rmse.
-    runs = runs.sort_values("metrics.test_rmse", ascending=True, na_position="last")
-    winners = runs.drop_duplicates(
-        subset=["cfg_name", "tags.model_type"], keep="first"
+    out = pd.DataFrame()
+    out["cfg_name"] = runs["cfg_name"]
+    out["scope"] = runs["tags.scope"]
+    out["mode"] = runs["tags.mode"]
+    out["includes_wnir_all"] = runs.get("tags.includes_wnir_all")
+    out["includes_wnir_cluster"] = runs.get("tags.includes_wnir_cluster")
+    out["model_type"] = runs["tags.model_type"]
+    out["cluster_algo"] = runs["tags.cluster_algo"]
+
+    # Cluster sizing params live under params.* (best HPO trial logged on Final_Test).
+    out["n_clusters"] = pd.to_numeric(runs.get("params.n_clusters"), errors="coerce")
+    out["hdb_min_cluster_size"] = pd.to_numeric(
+        runs.get("params.hdb_min_cluster_size"), errors="coerce"
+    )
+    out["hdb_min_samples"] = pd.to_numeric(
+        runs.get("params.hdb_min_samples"), errors="coerce"
+    )
+    out["R"] = pd.to_numeric(runs.get("params.R"), errors="coerce")
+
+    for m in ("test_rmse", "test_mae", "test_mape", "test_r2", "test_proxy_rmse"):
+        out[m] = pd.to_numeric(runs.get(f"metrics.{m}"), errors="coerce")
+    out["best_valid_rmse"] = pd.to_numeric(
+        runs.get("metrics.best_valid_rmse"), errors="coerce"
     )
 
-    pivot = pd.DataFrame(index=CONFIG_ORDER, columns=MODEL_ORDER, data=DASH)
-    filled = 0
-    for _, row in winners.iterrows():
-        cfg = row["cfg_name"]
-        model = row["tags.model_type"]
-        if cfg not in CONFIG_ORDER or model not in MODEL_ORDER:
-            continue
-        pivot.loc[cfg, model] = format_cell(row)
-        filled += 1
-    pivot.index.name = "configuration"
+    out["start_time"] = runs["start_time"]
+    out["run_id"] = runs["run_id"]
 
-    pivot.to_csv(OUT_PATH, quoting=csv.QUOTE_ALL)
+    # Stable, presentation-aligned ordering.
+    cfg_rank = {c: i for i, c in enumerate(CONFIG_ORDER)}
+    model_rank = {m: i for i, m in enumerate(MODEL_ORDER)}
+    cluster_rank = {c: i for i, c in enumerate(CLUSTER_ORDER)}
+    out["_cfg"] = out["cfg_name"].map(cfg_rank).fillna(99)
+    out["_model"] = out["model_type"].map(model_rank).fillna(99)
+    out["_cluster"] = out["cluster_algo"].map(cluster_rank).fillna(99)
+    out = out.sort_values(["_cfg", "_model", "_cluster"]).drop(
+        columns=["_cfg", "_model", "_cluster"]
+    )
 
-    total = len(CONFIG_ORDER) * len(MODEL_ORDER)
-    print(f"Wrote {OUT_PATH} ({filled}/{total} cells filled).")
+    out = out[OUTPUT_COLS]
+    out.to_csv(OUT_PATH, index=False)
 
-    missing = [
-        (cfg, m)
-        for cfg in CONFIG_ORDER
-        for m in MODEL_ORDER
-        if pivot.loc[cfg, m] == DASH
-    ]
-    if missing:
-        print(f"Missing ({len(missing)}):")
-        for cfg, m in missing:
-            print(f"  {cfg} × {m}")
-
+    print(f"Wrote {OUT_PATH} ({len(out)} runs).")
+    print(
+        f"  configs:      {out['cfg_name'].nunique()} / {len(CONFIG_ORDER)}\n"
+        f"  models:       {out['model_type'].nunique()} / {len(MODEL_ORDER)}\n"
+        f"  cluster algos:{sorted(out['cluster_algo'].dropna().unique().tolist())}"
+    )
     return 0
 
 
