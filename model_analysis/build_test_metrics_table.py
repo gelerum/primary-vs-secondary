@@ -57,7 +57,12 @@ OUTPUT_COLS = [
 
 
 def build_cfg_name(row) -> str:
-    base = f"{row['tags.scope']}_{row['tags.mode']}"
+    # For scope=nested the +wnir_all and +wnir_cluster flags are always True
+    # (ExpConfig sets them implicitly); the deck labels strip them.
+    scope = row["tags.scope"]
+    base = f"{scope}_{row['tags.mode']}"
+    if scope == "nested":
+        return base
     suffix = ""
     if row.get("tags.includes_wnir_all") == "True":
         suffix += "+wnir_all"
@@ -101,8 +106,12 @@ def main() -> int:
     out["model_type"] = runs["tags.model_type"]
     out["cluster_algo"] = runs["tags.cluster_algo"]
 
-    # Cluster sizing params live under params.* (best HPO trial logged on Final_Test).
-    out["n_clusters"] = pd.to_numeric(runs.get("params.n_clusters"), errors="coerce")
+    # n_clusters: prefer the metric logged inside objective_cluster (works for
+    # both kmeans and hdbscan); fall back to the kmeans hyperparam for older runs
+    # that predate the metric.
+    n_actual = pd.to_numeric(runs.get("metrics.n_clusters_actual"), errors="coerce")
+    n_param = pd.to_numeric(runs.get("params.n_clusters"), errors="coerce")
+    out["n_clusters"] = n_actual.combine_first(n_param)
     out["hdb_min_cluster_size"] = pd.to_numeric(
         runs.get("params.hdb_min_cluster_size"), errors="coerce"
     )

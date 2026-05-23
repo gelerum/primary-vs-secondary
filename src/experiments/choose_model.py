@@ -497,6 +497,11 @@ def objective_cluster(
     gc.collect()
 
     unique_clusters = sorted(df_train["cluster"].unique())
+    # Log actual cluster count — for hdbscan it's the only place this is recorded
+    # (params only carry min_cluster_size/min_samples). -1 is HDBSCAN noise.
+    mlflow.log_metric(
+        "n_clusters_actual", len([c for c in unique_clusters if c != -1])
+    )
 
     # 2. Подготовка массивов для валидации
     valid_p_idx = df_valid[df_valid["market_type"] == "primary"].index
